@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#071112">
+    <title>Database snapshot // Champion Fit</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body data-page="snapshot" class="page-snapshot">
+    <div class="noise"></div>
+    <aside class="sidebar">
+      <a class="brand" href="/"><span class="brand-mark">CF</span><span>CHAMPION<br>FIT</span></a>
+      <nav aria-label="Navigazione principale">
+        <a data-nav="snapshot" href="/">01 <span>Database snapshot</span></a>
+        <a data-nav="profile" href="/profile.html">02 <span>Profilo competitivo</span></a>
+        <a data-nav="fit" href="/fit.html">03 <span>Fit matrix</span></a>
+        <a data-nav="allocation" href="/allocation.html">03 <span>Exact allocation</span></a>
+        <a data-nav="blacklist" href="/blacklist.html">04 <span>Blacklist</span></a>
+        <a data-nav="audit" href="/audit.html">05 <span>Match audit</span></a>
+        <a data-nav="scout" href="/scout.html">06 <span>Scout list</span></a>
+      </nav>
+      <div class="sidebar-foot"><span class="dot"></span><span id="data-stamp">dataset locale</span><small>Icone da Riot Data Dragon.<br>Nessun asset champion locale.</small></div>
+    </aside>
+    <main>
+      <header class="masthead">
+        <div><p class="eyebrow">01 / database snapshot</p><h1>Prima il contesto.<br><em>Poi la decisione.</em></h1><p class="hero-copy">La base operativa per capire quanta evidenza abbiamo, cosa è già stato validato e dove serve ancora lavoro.</p></div>
+        <div class="method-note"><span>STATO LIVE</span><strong>Dataset locale<br>pronto per analisi.</strong><b id="scope-label"></b></div>
+      </header>
+      <section class="panel snapshot-panel">
+        <div class="section-title"><div><p class="eyebrow">Situazione operativa</p><h2>Database snapshot</h2></div><span class="section-note">volume · copertura · prossima azione</span></div>
+        <div id="metric-grid" class="metric-grid"></div>
+        <div class="role-block"><div class="section-title compact"><h3>Copertura per ruolo</h3><span>storico osservato / piano di test</span></div><div id="role-bars" class="role-bars"></div></div>
+      </section>
+      <section class="section-block action-grid">
+        <article class="action-card accent-mint"><span class="card-index">A</span><p class="eyebrow">Con Codex</p><h3>Interroga il dato</h3><p>Usa questa pagina per leggere il contesto prima di chiedere una nuova simulazione o una modifica al piano.</p><code>“confronta MIDDLE e JUNGLE”</code></article>
+        <article class="action-card accent-blue"><span class="card-index">B</span><p class="eyebrow">Chiamate API</p><h3>Leggi gli endpoint</h3><p>Le viste sono alimentate da JSON separati: snapshot, champion, piano, blacklist, match e scouting.</p><code>/api/overview · /api/champions</code></article>
+        <article class="action-card accent-coral"><span class="card-index">C</span><p class="eyebrow">Prossimo passo</p><h3>Riduci l’incertezza</h3><p>Vai su Exact allocation per scegliere la dimensione del prossimo campione di test e distribuire i game.</p><a class="text-link" href="/allocation.html">Apri il piano →</a></article>
+      </section>
+      <section class="section-block signal-strip"><div><p class="eyebrow">Lettura rapida</p><h2>Un sistema in sei viste.</h2></div><p>Ogni pagina ha una domanda precisa: cosa sappiamo, cosa performa, cosa testare, cosa escludere, come pesare i match e cosa osservare dopo.</p><div class="route-index"><span>01 snapshot</span><span>02 fit</span><span>03 allocation</span><span>04 governance</span><span>05 audit</span><span>06 scout</span></div></section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>

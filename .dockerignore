@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.git/
+docker-compose*.yml
+*.db
+*.db-*
+*.sqlite*
+data/
+outputs/
+.env
+.env.*
+!.env.example

@@ -1,0 +1,31 @@
+# Python caches and test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local databases and generated application data
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+data/
+outputs/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Local tooling and operating-system files
+AGENTS.md
+.venv/
+venv/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.log
