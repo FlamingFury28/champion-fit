@@ -146,6 +146,7 @@ CREATE TABLE IF NOT EXISTS match_participants (
     riot_id TEXT NOT NULL,
     team_id INTEGER NOT NULL DEFAULT 0,
     win INTEGER NOT NULL DEFAULT 0,
+    champion TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (match_id, puuid)
 );
 
@@ -168,6 +169,7 @@ CREATE TABLE IF NOT EXISTS friend_group_aliases (
 
 CREATE INDEX IF NOT EXISTS idx_fit_role_score ON champion_fit(role, account_adjusted_fit_score DESC);
 CREATE INDEX IF NOT EXISTS idx_matches_role_champion ON match_quality(role, champion);
+CREATE INDEX IF NOT EXISTS idx_matches_champion ON match_quality(champion);
 CREATE INDEX IF NOT EXISTS idx_matches_date ON match_quality(date DESC);
 CREATE INDEX IF NOT EXISTS idx_annotations_label ON match_annotations(manual_label);
 CREATE INDEX IF NOT EXISTS idx_participants_riot_id ON match_participants(riot_id);

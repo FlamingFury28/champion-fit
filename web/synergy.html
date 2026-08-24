@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="it">
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#071112"><title>Team synergy // Champion Fit</title><link rel="stylesheet" href="/styles.css?v=20260824-nav-2"></head>
+  <body data-page="synergy" class="page-profile">
+    <div class="noise"></div>
+    <aside class="sidebar">
+      <a class="brand" href="/"><span class="brand-mark">CF</span><span>CHAMPION<br>FIT</span></a>
+      <nav aria-label="Navigazione principale"></nav>
+      <div class="sidebar-foot"><span class="dot"></span><span id="data-stamp">dataset locale</span><small>Sinergie calcolate<br>sui game osservati.</small></div>
+    </aside>
+    <main>
+      <header class="masthead masthead-compact"><div><p class="eyebrow">team synergy / win evidence</p><h1>Chi vuoi al tuo fianco?<br><em>La squadra conta.</em></h1><p class="hero-copy">Confronta il tuo risultato quando in squadra compare un determinato champion. Scegli un tuo champion oppure leggi il quadro complessivo.</p></div><div class="method-note"><span>LETTURA</span><strong>win rate con il compagno</strong><b>Gli altri account già tracciati vengono esclusi per non confondere una tua seconda partita con un compagno reale.</b></div></header>
+      <section class="section-block synergy-shell">
+        <div class="section-title"><div><p class="eyebrow">Analisi squadra</p><h2>Con chi performi meglio o peggio?</h2></div><span id="synergy-scope" class="section-note"></span></div>
+        <div class="synergy-controls"><label for="synergy-champion-filter">Il tuo champion<select id="synergy-champion-filter"><option value="ALL">Tutti i champion giocati</option></select></label><label for="synergy-min-games">Campione minimo<select id="synergy-min-games"><option value="1">Almeno 1 game</option><option value="3" selected>Almeno 3 game</option><option value="5">Almeno 5 game</option><option value="10">Almeno 10 game</option></select></label><span id="synergy-summary" class="section-note"></span><p id="synergy-filter-status" class="synergy-filter-status" role="status"></p></div>
+        <div class="synergy-grid"><div class="synergy-column synergy-better"><div class="section-title"><div><p class="eyebrow">Win rate più alto</p><h3>Con chi performi meglio</h3></div><span>compagni migliori</span></div><div id="synergy-better" class="synergy-list"></div></div><div class="synergy-column synergy-worse"><div class="section-title"><div><p class="eyebrow">Win rate più basso</p><h3>Con chi performi peggio</h3></div><span>da capire meglio</span></div><div id="synergy-worse" class="synergy-list"></div></div></div>
+      </section>
+      <section class="section-block matrix-foot"><span class="big-index">→</span><div><p class="eyebrow">Interpretazione</p><h3>Il win rate non basta senza il numero di game.</h3><p>Usa la soglia minima per evitare che una singola partita trasformi un compagno in una conclusione. Le classifiche mostrano sempre vittorie, sconfitte e volume.</p></div><a class="button-link" href="/profile.html">Torna al profilo →</a></section>
+    </main>
+    <script src="/app.js?v=20260824-synergy-fix-4"></script>
+  </body>
+</html>

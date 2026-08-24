@@ -32,6 +32,9 @@ STORAGE = build_storage(DB_PATH, SCHEMA_PATH, os.environ.get("CHAMPION_FIT_DATAB
 DDRAGON_VERSION = os.environ.get("DDRAGON_VERSION", "16.13.1")
 ROLES = ("TOP", "JUNGLE", "MIDDLE", "BOTTOM", "SUPPORT")
 DEFAULT_FRIEND_MIN_SHARED_GAMES = 5
+MATCHUP_PRIOR_EVIDENCE = 8.0
+MATCHUP_Z_90 = 1.6448536269514722
+MATCHUP_MIN_DIRECTION_CONFIDENCE = 20.0
 
 
 def friend_min_shared_games(params: dict[str, list[str]]) -> int:
@@ -300,6 +303,91 @@ def rank_recommendations(candidates: list[dict], limit: int = 3) -> list[dict]:
     return chosen
 
 
+def matchup_metrics(item: dict, baseline_win_rate: float, total_games_with_opponents: int) -> dict:
+    """Score one matchup using evidence quality, uncertainty and context.
+
+    The raw win rate is only the observed signal.  The recommendation uses a
+    shrunk posterior, its uncertainty, the amount of attributable evidence,
+    recency and opponent exposure.  This keeps a one-game 100% result from
+    outranking a stable counter supported by a much larger sample.
+    """
+    games = int(item.get("games") or 0)
+    positive = max(float(item.get("positive_evidence") or 0), 0.0)
+    negative = max(float(item.get("negative_evidence") or 0), 0.0)
+    evidence = positive + negative
+    evidence_square = max(float(item.get("evidence_square") or 0), 0.0)
+    effective_sample_size = evidence * evidence / evidence_square if evidence and evidence_square else 0.0
+
+    baseline_win_rate = min(max(float(baseline_win_rate), 0.05), 0.95)
+    alpha = baseline_win_rate * MATCHUP_PRIOR_EVIDENCE + positive
+    beta = (1.0 - baseline_win_rate) * MATCHUP_PRIOR_EVIDENCE + negative
+    posterior = alpha / max(alpha + beta, 1e-9)
+    variance = alpha * beta / max((alpha + beta) ** 2 * (alpha + beta + 1.0), 1e-9)
+    standard_deviation = math.sqrt(max(variance, 0.0))
+    lower = max(0.0, posterior - MATCHUP_Z_90 * standard_deviation)
+    upper = min(1.0, posterior + MATCHUP_Z_90 * standard_deviation)
+
+    if standard_deviation:
+        probability_below_baseline = 0.5 * (
+            1.0 + math.erf((baseline_win_rate - posterior) / (standard_deviation * math.sqrt(2.0)))
+        )
+    else:
+        probability_below_baseline = 1.0 if posterior < baseline_win_rate else 0.0
+    probability_below_baseline = min(max(probability_below_baseline, 0.0), 1.0)
+    probability_above_baseline = 1.0 - probability_below_baseline
+
+    # The direction uses attributable evidence, not raw games.  A short or
+    # annotated loss should not make a champion look like a counter.
+    if negative > positive:
+        recommendation = "loses_to"
+        direction_probability = probability_below_baseline
+    elif positive > negative:
+        recommendation = "beats"
+        direction_probability = probability_above_baseline
+    else:
+        recommendation = "neutral"
+        direction_probability = 0.5
+
+    direction_confidence = min(max(2.0 * (direction_probability - 0.5), 0.0), 1.0)
+    quality_coverage = min(evidence / max(games, 1), 1.0)
+    recent_evidence = max(float(item.get("recent_evidence") or 0), 0.0)
+    recent_share = min(recent_evidence / max(evidence, 1e-9), 1.0) if evidence else 0.0
+    exposure_rate = games / max(total_games_with_opponents, 1)
+    evidence_maturity = min(math.log1p(max(effective_sample_size, 0.0)) / math.log1p(30.0), 1.0)
+
+    # Combine absolute matchup disadvantage with the deviation from the
+    # player's own baseline.  Confidence and evidence maturity carry more
+    # weight than exposure, so play rate cannot manufacture a recommendation.
+    absolute_delta = abs(posterior - 0.5)
+    relative_delta = abs(posterior - baseline_win_rate)
+    impact = 0.70 * absolute_delta + 0.30 * relative_delta
+    score = impact * direction_confidence
+    score *= 0.60 + 0.40 * quality_coverage
+    score *= 0.55 + 0.45 * evidence_maturity
+    score *= 0.85 + 0.15 * recent_share
+    score *= 0.85 + 0.15 * math.sqrt(min(max(exposure_rate, 0.0), 1.0))
+
+    return {
+        "positive_evidence": round(positive, 2),
+        "negative_evidence": round(negative, 2),
+        "effective_evidence": round(evidence, 2),
+        "effective_sample_size": round(effective_sample_size, 1),
+        "weighted_win_rate_against": round(positive / max(evidence, 1e-9) * 100.0, 1) if evidence else 50.0,
+        "posterior_win_rate": round(posterior * 100.0, 1),
+        "credible_lower_90": round(lower * 100.0, 1),
+        "credible_upper_90": round(upper * 100.0, 1),
+        "probability_worse_than_baseline": round(probability_below_baseline * 100.0, 1),
+        "direction_confidence": round(direction_confidence * 100.0, 1),
+        "quality_coverage": round(quality_coverage * 100.0, 1),
+        "recent_90d_games": int(item.get("recent_games") or 0),
+        "exposure_rate": round(exposure_rate * 100.0, 2),
+        "baseline_win_rate": round(baseline_win_rate * 100.0, 1),
+        "relative_delta_pp": round((posterior - baseline_win_rate) * 100.0, 1),
+        "matchup_score": round(score * 100.0, 2),
+        "recommendation": recommendation,
+    }
+
+
 def as_bool(value: str) -> int:
     return int(str(value).strip().lower() in {"1", "true", "yes", "win", "won"})
 
@@ -345,6 +433,15 @@ def companion_filter(params: dict[str, list[str]], match_column: str = "m.match_
     selected = selected_accounts(params)
     mode = params.get("companion_mode", [""])[0].strip().lower()
     if not accounts or mode not in {"exclude", "only"}:
+        return "", []
+    # A companion profile must be different from the profile being analysed.
+    # Otherwise "exclude" would remove the user's own matches (for example
+    # selecting Kite while excluding the Kite profile), and "only" would make
+    # the scope ambiguous. Treat the overlap as no presence filter instead of
+    # returning an apparently valid but empty dataset.
+    selected_keys = {account.casefold() for account in selected}
+    accounts = [account for account in accounts if account.casefold() not in selected_keys]
+    if not accounts:
         return "", []
     placeholders = ",".join("?" for _ in accounts)
     present = (
@@ -441,15 +538,124 @@ def load_match_participants(source: Path, connection) -> int:
                 tag_line = str(participant.get("riotIdTagline", "")).strip()
                 riot_id = f"{game_name}#{tag_line}" if game_name and tag_line else game_name
                 if puuid and riot_id:
-                    rows.append((match_id, puuid, riot_id, as_int(str(participant.get("teamId", 0))), as_bool(str(participant.get("win", False)))))
+                    rows.append((
+                        match_id, puuid, riot_id,
+                        as_int(str(participant.get("teamId", 0))),
+                        as_bool(str(participant.get("win", False))),
+                        str(participant.get("championName", "")).strip(),
+                    ))
             if rows:
                 connection.executemany(
-                    "INSERT OR IGNORE INTO match_participants(match_id,puuid,riot_id,team_id,win) VALUES(?,?,?,?,?)",
+                    """INSERT INTO match_participants(match_id,puuid,riot_id,team_id,win,champion)
+                       VALUES(?,?,?,?,?,?)
+                       ON CONFLICT(match_id,puuid) DO UPDATE SET
+                         riot_id=excluded.riot_id,
+                         team_id=excluded.team_id,
+                         win=excluded.win,
+                         champion=CASE WHEN excluded.champion <> '' THEN excluded.champion
+                                       ELSE match_participants.champion END""",
                     rows,
                 )
                 loaded += len(rows)
     connection.commit()
     return loaded
+
+
+def migrate_match_participant_champions(connection) -> int:
+    """Add champion names to participant rows and backfill them from Riot payloads."""
+    if STORAGE.engine == "postgres":
+        columns = {
+            row["column_name"]
+            for row in connection.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name='match_participants'"
+            )
+        }
+    else:
+        columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(match_participants)")
+        }
+    if "champion" not in columns:
+        connection.execute(
+            "ALTER TABLE match_participants ADD COLUMN champion TEXT NOT NULL DEFAULT ''"
+        )
+
+    # The participant table predates matchup analysis in some local snapshots.
+    # Only inspect raw payloads for matches that do not yet have a complete
+    # standard five-versus-five roster, so normal server starts stay cheap.
+    raw_rows = connection.execute(
+        """SELECT r.match_id, r.payload_json
+           FROM riot_match_raw r
+           WHERE EXISTS (SELECT 1 FROM match_quality mq WHERE mq.match_id=r.match_id)
+             AND (SELECT COUNT(*) FROM match_participants p
+                  WHERE p.match_id=r.match_id AND COALESCE(p.champion, '') <> '') < 10"""
+    )
+    participant_rows = []
+    opponent_champions = set()
+    updated = 0
+
+    def flush_rows() -> None:
+        nonlocal participant_rows
+        if not participant_rows:
+            return
+        connection.executemany(
+            """INSERT INTO match_participants(match_id,puuid,riot_id,team_id,win,champion)
+               VALUES(?,?,?,?,?,?)
+               ON CONFLICT(match_id,puuid) DO UPDATE SET
+                 riot_id=excluded.riot_id,
+                 team_id=excluded.team_id,
+                 win=excluded.win,
+                 champion=CASE WHEN excluded.champion <> '' THEN excluded.champion
+                               ELSE match_participants.champion END""",
+            participant_rows,
+        )
+        participant_rows = []
+
+    for raw in raw_rows:
+        try:
+            payload = json.loads(raw["payload_json"])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        info = payload.get("info", {})
+        if not is_supported_queue(info.get("queueId")):
+            continue
+        participants = info.get("participants", [])
+        if not isinstance(participants, list):
+            continue
+        for participant in participants:
+            if not isinstance(participant, dict):
+                continue
+            puuid = str(participant.get("puuid", "")).strip()
+            if not puuid:
+                continue
+            game_name = str(participant.get("riotIdGameName", "")).strip()
+            tag_line = str(participant.get("riotIdTagline", "")).strip()
+            riot_id = f"{game_name}#{tag_line}" if game_name and tag_line else game_name
+            champion = str(participant.get("championName", "")).strip()
+            if not riot_id or not champion:
+                continue
+            participant_rows.append((
+                str(raw["match_id"]), puuid, riot_id,
+                as_int(str(participant.get("teamId", 0))),
+                as_bool(str(participant.get("win", False))), champion,
+            ))
+            opponent_champions.add(champion)
+            updated += 1
+            if len(participant_rows) >= 2000:
+                flush_rows()
+    flush_rows()
+
+    if opponent_champions:
+        connection.executemany(
+            """INSERT INTO champions(champion,asset_id,icon_url) VALUES(?,?,?)
+               ON CONFLICT(champion) DO NOTHING""",
+            [
+                (champion, champion_asset_id(champion), icon_url(champion))
+                for champion in sorted(opponent_champions)
+            ],
+        )
+    connection.commit()
+    return updated
 
 
 def load_tracked_account_puuids(source: Path, connection) -> int:
@@ -535,6 +741,7 @@ def database(source: Path, rebuild: bool) -> None:
         STORAGE.initialize()
         connection = STORAGE.connect()
         try:
+            migrate_match_participant_champions(connection)
             purge_urf_matches(connection)
             migrate_riot_loss_weights(connection)
         finally:
@@ -545,6 +752,7 @@ def database(source: Path, rebuild: bool) -> None:
         try:
             STORAGE.initialize()
             migrate_remove_personal_performance(connection)
+            migrate_match_participant_champions(connection)
             load_match_participants(source, connection)
             load_tracked_account_puuids(source, connection)
             migrate_legacy_roles(connection)
@@ -676,6 +884,7 @@ def database(source: Path, rebuild: bool) -> None:
             } for row in quality_rows],
         )
         load_match_participants(source, connection)
+        migrate_match_participant_champions(connection)
         load_tracked_account_puuids(source, connection)
         payload = json.loads((source / "champion_fit.json").read_text(encoding="utf-8"))
         metadata = {
@@ -689,6 +898,302 @@ def database(source: Path, rebuild: bool) -> None:
         connection.commit()
     finally:
         connection.close()
+
+
+def matchup_data(connection, params: dict[str, list[str]], champion: str, role: str = "") -> dict:
+    """Return evidence-weighted, uncertainty-aware direct matchup rankings."""
+    selected_champion = str(champion or "").strip()
+    if selected_champion.upper() in {"", "ALL"}:
+        selected_champion = ""
+    accounts = selected_accounts(params)
+    account_sql, account_values = account_filter(accounts, "m.account")
+    companion_sql, companion_values = companion_filter(params, "m.match_id")
+    role = normalize_role(role) if role else ""
+    role_sql = " AND m.role=?" if role in ROLES else ""
+    scope_sql = f"m.role != 'INVALID'{role_sql}{account_sql}{companion_sql}"
+    scope_values = ([role] if role in ROLES else []) + account_values + companion_values
+    base_sql = f"{scope_sql}{' AND m.champion=?' if selected_champion else ''}"
+    base_values = scope_values + ([selected_champion] if selected_champion else [])
+
+    # A match_quality row belongs to one tracked account. Resolve that
+    # account's own participant first, then keep only participants on the
+    # opposite team. The Riot ID fallback covers older snapshots without the
+    # historical PUUID mapping.
+    owned_participant = """EXISTS (
+        SELECT 1
+        FROM match_participants mine
+        LEFT JOIN tracked_account_puuids mine_tracked ON mine_tracked.puuid=mine.puuid
+        LEFT JOIN riot_accounts_raw mine_raw ON mine_raw.puuid=mine.puuid
+        WHERE mine.match_id=m.match_id
+          AND (
+              mine_tracked.account=m.account
+              OR mine_raw.account=m.account
+              OR LOWER(mine.riot_id)=LOWER(m.account)
+          )
+          AND mine.team_id <> opp.team_id
+    )"""
+    opponent_exists = f"""EXISTS (
+        SELECT 1
+        FROM match_participants opp
+        WHERE opp.match_id=m.match_id
+          AND opp.win <> m.win
+          AND COALESCE(opp.champion, '') <> ''
+          AND {owned_participant}
+    )"""
+
+    recent_expression = (
+        "m.date::timestamp >= CURRENT_TIMESTAMP - INTERVAL '90 days'"
+        if STORAGE.engine == "postgres"
+        else "m.date >= datetime('now','-90 day')"
+    )
+    win_evidence_sql = "CASE WHEN m.win=1 THEN COALESCE(m.win_evidence_weight,0) ELSE 0 END"
+    loss_evidence_sql = """CASE WHEN m.win=0 THEN
+                              CASE WHEN COALESCE(a.invincible,0)=1
+                                        OR COALESCE(a.afk_player,0)=1
+                                        OR COALESCE(a.griefer,0)=1
+                                   THEN 0 ELSE COALESCE(m.loss_attribution_weight,0) END
+                              ELSE 0 END"""
+    evidence_sql = f"(({win_evidence_sql}) + ({loss_evidence_sql}))"
+
+    source_stats = dict(connection.execute(
+        f"""SELECT COUNT(DISTINCT m.id) games,
+                   COUNT(DISTINCT CASE WHEN m.win=1 THEN m.id END) wins,
+                   COUNT(DISTINCT CASE WHEN {opponent_exists} THEN m.id END) games_with_opponents,
+                   COALESCE(SUM(CASE WHEN {opponent_exists} THEN ({win_evidence_sql}) ELSE 0 END),0) positive_evidence,
+                   COALESCE(SUM(CASE WHEN {opponent_exists} THEN ({loss_evidence_sql}) ELSE 0 END),0) negative_evidence
+            FROM match_quality m
+            LEFT JOIN match_annotations a ON a.match_id=m.match_id
+            WHERE {base_sql}""",
+        base_values,
+    ).fetchone())
+
+    available = rows_to_dicts(connection.execute(
+            f"""SELECT m.champion, COUNT(DISTINCT m.id) games, c.icon_url
+            FROM match_quality m
+            LEFT JOIN champions c ON c.champion=m.champion
+            WHERE {scope_sql}
+            GROUP BY m.champion, c.icon_url
+            ORDER BY LOWER(m.champion)""",
+        scope_values,
+    ))
+    for item in available:
+        item["icon_url"] = item.get("icon_url") or icon_url(item["champion"])
+
+    rows = rows_to_dicts(connection.execute(
+        f"""SELECT opp.champion opponent_champion,
+                   COUNT(DISTINCT m.id) games,
+                   COUNT(DISTINCT CASE WHEN m.win=0 THEN m.id END) losses_to,
+                   COUNT(DISTINCT CASE WHEN m.win=1 THEN m.id END) wins_against,
+                   COALESCE(SUM({win_evidence_sql}),0) positive_evidence,
+                   COALESCE(SUM({loss_evidence_sql}),0) negative_evidence,
+                   COALESCE(SUM(({evidence_sql}) * ({evidence_sql})),0) evidence_square,
+                   COUNT(DISTINCT CASE WHEN {recent_expression} THEN m.id END) recent_games,
+                   COALESCE(SUM(CASE WHEN {recent_expression} THEN ({evidence_sql}) ELSE 0 END),0) recent_evidence,
+                   c.icon_url
+            FROM match_quality m
+            JOIN match_participants opp
+              ON opp.match_id=m.match_id
+             AND opp.win <> m.win
+             AND COALESCE(opp.champion, '') <> ''
+             AND {owned_participant}
+            LEFT JOIN champions c ON c.champion=opp.champion
+            LEFT JOIN match_annotations a ON a.match_id=m.match_id
+            WHERE {base_sql}
+            GROUP BY opp.champion, c.icon_url""",
+        base_values,
+    ))
+    baseline_positive = float(source_stats.get("positive_evidence") or 0)
+    baseline_negative = float(source_stats.get("negative_evidence") or 0)
+    baseline_evidence = baseline_positive + baseline_negative
+    baseline_win_rate = baseline_positive / max(baseline_evidence, 1e-9) if baseline_evidence else 0.5
+    total_games_with_opponents = int(source_stats.get("games_with_opponents") or 0)
+    items = []
+    for item in rows:
+        games = int(item.get("games") or 0)
+        wins = int(item.get("wins_against") or 0)
+        losses = int(item.get("losses_to") or 0)
+        opponent = item["opponent_champion"]
+        matchup_item = {
+            "champion": opponent,
+            "icon_url": item.get("icon_url") or icon_url(opponent),
+            "games": games,
+            "wins_against": wins,
+            "losses_to": losses,
+            "win_rate_against": round(wins / max(games, 1) * 100, 1),
+        }
+        matchup_item.update(matchup_metrics(item, baseline_win_rate, total_games_with_opponents))
+        items.append(matchup_item)
+
+    # The direction is assigned once from attributable evidence, then each
+    # side is ranked by the same composite score.  A champion can therefore
+    # never be presented as both a counter and a favourable matchup.
+    loses_to = [
+        item for item in items
+        if item["recommendation"] == "loses_to"
+        and item["direction_confidence"] >= MATCHUP_MIN_DIRECTION_CONFIDENCE
+    ]
+    beats = [
+        item for item in items
+        if item["recommendation"] == "beats"
+        and item["direction_confidence"] >= MATCHUP_MIN_DIRECTION_CONFIDENCE
+    ]
+    matchup_sort = lambda item: (
+        -item["matchup_score"],
+        -item["direction_confidence"],
+        -item["effective_sample_size"],
+        -item["games"],
+        item["champion"],
+    )
+
+    return {
+        "champion": selected_champion or "ALL",
+        "role": role or "ALL",
+        "games": int(source_stats.get("games") or 0),
+        "wins": int(source_stats.get("wins") or 0),
+        "win_rate": round(int(source_stats.get("wins") or 0) / max(int(source_stats.get("games") or 0), 1) * 100, 1),
+        "games_with_opponents": int(source_stats.get("games_with_opponents") or 0),
+        "available_champions": available,
+        "baseline_win_rate": round(baseline_win_rate * 100.0, 1),
+        "loses_to": sorted(loses_to, key=matchup_sort)[:12],
+        "beats": sorted(beats, key=matchup_sort)[:12],
+    }
+
+
+def synergy_data(connection, params: dict[str, list[str]]) -> dict:
+    """Return teammate-champion performance for the active account scope."""
+    accounts = selected_accounts(params)
+    account_sql, account_values = account_filter(accounts, "m.account")
+    companion_sql, companion_values = companion_filter(params, "m.match_id")
+    selected_champion = params.get("champion", ["ALL"])[0].strip()
+    if selected_champion.upper() in {"", "ALL"}:
+        selected_champion = ""
+    try:
+        min_games = int(params.get("min_games", ["3"])[0])
+    except (TypeError, ValueError):
+        min_games = 3
+    min_games = max(1, min(100, min_games))
+
+    scope_sql = f"m.role != 'INVALID'{account_sql}{companion_sql}"
+    scope_values = account_values + companion_values
+    champion_sql = " AND m.champion=?" if selected_champion else ""
+    base_sql = f"{scope_sql}{champion_sql}"
+    base_values = scope_values + ([selected_champion] if selected_champion else [])
+
+    available = rows_to_dicts(connection.execute(
+        f"""SELECT m.champion, COUNT(DISTINCT m.id) games, c.icon_url
+            FROM match_quality m
+            LEFT JOIN champions c ON c.champion=m.champion
+            WHERE {scope_sql}
+            GROUP BY m.champion, c.icon_url
+            ORDER BY LOWER(m.champion)""",
+        scope_values,
+    ))
+    for item in available:
+        item["icon_url"] = item.get("icon_url") or icon_url(item["champion"])
+
+    # Fetch only the already-scoped matches, then their rosters in batches.
+    # This avoids repeatedly resolving account ownership in correlated SQL
+    # subqueries when the full local history is selected.
+    match_rows = rows_to_dicts(connection.execute(
+        f"""SELECT m.id, m.match_id, m.account, m.win
+            FROM match_quality m
+            WHERE {base_sql}""",
+        base_values,
+    ))
+    match_ids = list(dict.fromkeys(str(row["match_id"]) for row in match_rows))
+    participants_by_match = {}
+    for offset in range(0, len(match_ids), 500):
+        batch = match_ids[offset:offset + 500]
+        placeholders = ",".join("?" for _ in batch)
+        participant_rows = connection.execute(
+            f"""SELECT match_id, puuid, riot_id, team_id, champion
+                FROM match_participants
+                WHERE match_id IN ({placeholders}) AND COALESCE(champion, '') <> ''""",
+            batch,
+        )
+        for participant in participant_rows:
+            participants_by_match.setdefault(str(participant["match_id"]), []).append(dict(participant))
+
+    owner_by_puuid = {
+        str(row["puuid"]): str(row["account"])
+        for row in connection.execute("SELECT puuid, account FROM tracked_account_puuids")
+        if row["puuid"] and row["account"]
+    }
+    owner_by_puuid.update({
+        str(row["puuid"]): str(row["account"])
+        for row in connection.execute("SELECT puuid, account FROM riot_accounts_raw")
+        if row["puuid"] and row["account"]
+    })
+    tracked_names = {
+        str(row["account"]).casefold()
+        for row in connection.execute(
+            "SELECT account FROM match_quality UNION SELECT account FROM riot_accounts_raw"
+        )
+        if row["account"]
+    }
+    teammate_stats = {}
+    games = {row["id"] for row in match_rows}
+    games_with_teammates = set()
+    for match in match_rows:
+        match_participants = participants_by_match.get(str(match["match_id"]), [])
+        account = str(match["account"] or "")
+        account_key = account.casefold()
+        owned = [
+            participant for participant in match_participants
+            if owner_by_puuid.get(str(participant["puuid"]), "").casefold() == account_key
+            or str(participant["riot_id"] or "").casefold() == account_key
+        ]
+        if not owned:
+            continue
+        own_puuids = {str(participant["puuid"]) for participant in owned}
+        own_teams = {participant["team_id"] for participant in owned}
+        found_teammate = False
+        for participant in match_participants:
+            teammate_champion = str(participant["champion"] or "")
+            teammate_puuid = str(participant["puuid"])
+            teammate_riot_id = str(participant["riot_id"] or "")
+            if (
+                not teammate_champion
+                or teammate_puuid in own_puuids
+                or teammate_puuid in owner_by_puuid
+                or teammate_riot_id.casefold() in tracked_names
+                or participant["team_id"] not in own_teams
+            ):
+                continue
+            found_teammate = True
+            stats = teammate_stats.setdefault(teammate_champion, {"games": set(), "wins": set(), "losses": set()})
+            stats["games"].add(match["id"])
+            (stats["wins"] if match["win"] else stats["losses"]).add(match["id"])
+        if found_teammate:
+            games_with_teammates.add(match["id"])
+
+    items = []
+    for teammate, stats in teammate_stats.items():
+        teammate_games = len(stats["games"])
+        if teammate_games < min_games:
+            continue
+        wins = len(stats["wins"])
+        losses = len(stats["losses"])
+        items.append({
+            "champion": teammate,
+            "icon_url": icon_url(teammate),
+            "games": teammate_games,
+            "wins": wins,
+            "losses": losses,
+            "win_rate": round(wins / max(teammate_games, 1) * 100, 1),
+        })
+
+    return {
+        "champion": selected_champion or "ALL",
+        "accounts": accounts,
+        "companion_filter_active": bool(companion_values),
+        "min_games": min_games,
+        "games": len(games),
+        "games_with_teammates": len(games_with_teammates),
+        "available_champions": available,
+        "better_with": sorted(items, key=lambda item: (-item["win_rate"], -item["games"], item["champion"]))[:12],
+        "worse_with": sorted(items, key=lambda item: (item["win_rate"], -item["games"], item["champion"]))[:12],
+    }
 
 
 def query_database(path: str, params: dict[str, list[str]]) -> tuple[int, dict]:
@@ -1086,7 +1591,16 @@ def query_database(path: str, params: dict[str, list[str]]) -> tuple[int, dict]:
                    FROM match_quality m WHERE champion=?{account_sql}{companion_sql} ORDER BY date DESC LIMIT 20""", [champion, *account_values, *companion_values]
             ))
             roles = rows_to_dicts(connection.execute("SELECT role, games_observed, account_adjusted_fit_score, credible_lower_90, credible_upper_90 FROM champion_fit WHERE champion=? ORDER BY games_observed DESC", (champion,)))
-            return HTTPStatus.OK, {"champion": champion, "role": role, "accounts": accounts, "fit": dict(fit) if fit else None, "stats": dict(stat) | dict(annotated), "recent": recent, "roles": roles}
+            matchups = matchup_data(connection, params, champion, role)
+            return HTTPStatus.OK, {"champion": champion, "role": role, "accounts": accounts, "fit": dict(fit) if fit else None, "stats": dict(stat) | dict(annotated), "recent": recent, "roles": roles, "matchups": matchups}
+
+        if path == "/api/matchups":
+            champion = params.get("champion", ["ALL"])[0].strip() or "ALL"
+            role = params.get("role", [""])[0].strip()
+            return HTTPStatus.OK, matchup_data(connection, params, champion, role)
+
+        if path == "/api/synergy":
+            return HTTPStatus.OK, synergy_data(connection, params)
 
         if path == "/api/champions":
             clauses, values = ["1=1"], []
@@ -1306,6 +1820,13 @@ def query_database(path: str, params: dict[str, list[str]]) -> tuple[int, dict]:
 class DashboardHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(WEB_ROOT), **kwargs)
+
+    def end_headers(self) -> None:
+        if urlparse(self.path).path in {"/app.js", "/styles.css"}:
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Expires", "0")
+        super().end_headers()
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)

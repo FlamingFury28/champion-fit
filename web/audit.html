@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="it">
-  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#071112"><title>Match audit // Champion Fit</title><link rel="stylesheet" href="/styles.css"></head>
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#071112"><title>Match audit // Champion Fit</title><link rel="stylesheet" href="/styles.css?v=20260824-nav-2"></head>
   <body data-page="audit" class="page-audit">
     <div class="noise"></div>
     <aside class="sidebar"><a class="brand" href="/"><span class="brand-mark">CF</span><span>CHAMPION<br>FIT</span></a><nav aria-label="Navigazione principale"><a data-nav="snapshot" href="/">01 <span>Database snapshot</span></a><a data-nav="fit" href="/fit.html">02 <span>Fit matrix</span></a><a data-nav="allocation" href="/allocation.html">03 <span>Exact allocation</span></a><a data-nav="blacklist" href="/blacklist.html">04 <span>Blacklist</span></a><a data-nav="audit" href="/audit.html">05 <span>Match audit</span></a><a data-nav="scout" href="/scout.html">06 <span>Scout list</span></a></nav><div class="sidebar-foot"><span class="dot"></span><span id="data-stamp">dataset locale</span><small>Traccia decisionale.<br>Loss contaminate prima.</small></div></aside>
@@ -9,6 +9,6 @@
       <section class="section-block audit-toolbar"><div><p class="eyebrow">Finestra di revisione</p><h2>Controlla il segnale.</h2></div><div class="audit-controls"><select id="audit-flag" aria-label="Filtro match"><option value="contaminated">Loss contaminate</option><option value="afk">AFK / quasi-AFK</option><option value="loss">Tutte le loss</option><option value="all">Tutti i match</option></select><button id="reload-audit" type="button">Aggiorna</button></div></section>
       <section class="section-block audit-section"><div class="section-title"><div><p class="eyebrow">Match quality</p><h2>Decisioni recenti</h2></div><span class="section-note">peso evidenza · qualità · anomalia</span></div><div id="audit-list" class="audit-list"></div></section>
       <section class="section-block audit-foot"><span class="big-index">05</span><div><p class="eyebrow">Logica</p><h3>Una loss rumorosa non deve spostare il fit.</h3><p>Durata breve, resa anticipata, AFK e collasso precoce abbassano l’attribuzione. Le vittorie restano ad alta evidenza.</p></div><a class="button-link" href="/fit.html">Torna al fit →</a></section>
-    </main><script src="/app.js"></script>
+    </main><script src="/app.js?v=20260824-synergy-fix-1"></script>
   </body>
 </html>

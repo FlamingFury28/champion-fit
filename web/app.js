@@ -73,17 +73,66 @@ async function apiDelete(path) {
   if (!response.ok) throw new Error(`API ${response.status}`);
   return response.json();
 }
+function normalizedAccounts(accounts) {
+  return [...new Set((Array.isArray(accounts) ? accounts : []).map((account) => String(account || '').trim()).filter(Boolean))]
+    .sort((left, right) => left.localeCompare(right));
+}
+function sameAccountSet(left, right) {
+  const a = normalizedAccounts(left); const b = normalizedAccounts(right);
+  return a.length === b.length && a.every((account, index) => account === b[index]);
+}
+function readCompanionFilter() {
+  const filter = readStoredJson(COMPANION_FILTER_KEY, null);
+  if (!filter || !Array.isArray(filter.accounts) || !filter.accounts.length || !['exclude', 'only'].includes(filter.mode)) return null;
+  return { ...filter, accounts: normalizedAccounts(filter.accounts) };
+}
+function clearCompanionFilter() {
+  localStorage.removeItem(COMPANION_FILTER_KEY);
+  renderGlobalScopeSummary();
+}
+function companionFilterText(filter) {
+  if (!filter) return 'Nessun filtro presenza attivo';
+  return filter.mode === 'exclude'
+    ? `Esclude i game in cui compare ${filter.name || 'il profilo scelto'}`
+    : `Mostra solo i game in cui compare ${filter.name || 'il profilo scelto'}`;
+}
+function renderGlobalScopeSummary() {
+  const sidebar = document.querySelector('.sidebar');
+  if (!sidebar) return;
+  let summary = sidebar.querySelector('[data-global-scope-summary]');
+  if (!summary) {
+    summary = document.createElement('section');
+    summary.className = 'global-scope-summary';
+    summary.dataset.globalScopeSummary = '1';
+    sidebar.insertBefore(summary, sidebar.querySelector('.sidebar-foot'));
+  }
+  const selected = readStoredJson(PROFILE_ACCOUNTS_KEY, []);
+  const selectedLabel = Array.isArray(selected) && selected.length
+    ? (selected.length === 1 ? '1 account selezionato' : `${selected.length} account selezionati`)
+    : 'Nessun account selezionato';
+  const filter = readCompanionFilter();
+  summary.innerHTML = `<p>PERIMETRO ATTIVO</p><strong>${esc(selectedLabel)}</strong><small>${esc(companionFilterText(filter))}</small><a href="/profile.html#companion-filter-panel">Gestisci filtro presenza →</a>`;
+  summary.classList.toggle('is-filtered', Boolean(filter));
+}
 function accountQuery() {
   const accounts = readStoredJson(PROFILE_ACCOUNTS_KEY, []);
   if (!Array.isArray(accounts)) return '';
   return accounts.map((account) => `account=${encodeURIComponent(account)}`).join('&');
 }
 function companionQuery() {
-  try {
-    const filter = JSON.parse(localStorage.getItem(COMPANION_FILTER_KEY) || 'null');
-    if (!filter || !Array.isArray(filter.accounts) || !filter.accounts.length || !['exclude', 'only'].includes(filter.mode)) return '';
-    return `${filter.accounts.map((account) => `companion_account=${encodeURIComponent(account)}`).join('&')}&companion_mode=${encodeURIComponent(filter.mode)}`;
-  } catch { return ''; }
+  const filter = readCompanionFilter();
+  if (!filter) return '';
+  const selected = readStoredJson(PROFILE_ACCOUNTS_KEY, []);
+  const boundAccounts = Array.isArray(filter.profile_accounts) ? filter.profile_accounts : null;
+  if (boundAccounts && !sameAccountSet(boundAccounts, selected)) {
+    clearCompanionFilter();
+    return '';
+  }
+  if (Array.isArray(selected) && filter.accounts.some((account) => selected.includes(account))) {
+    clearCompanionFilter();
+    return '';
+  }
+  return `${filter.accounts.map((account) => `companion_account=${encodeURIComponent(account)}`).join('&')}&companion_mode=${encodeURIComponent(filter.mode)}`;
 }
 function scopedQuery() { return [accountQuery(), companionQuery()].filter(Boolean).join('&'); }
 async function loadGlobalAccountPicker() {
@@ -92,19 +141,22 @@ async function loadGlobalAccountPicker() {
   const data = await api('/api/accounts');
   const accounts = data.items || [];
   if (!accounts.length) return;
-  let selected;
-  try { selected = JSON.parse(localStorage.getItem(PROFILE_ACCOUNTS_KEY) || 'null'); } catch { selected = null; }
+  const previous = readStoredJson(PROFILE_ACCOUNTS_KEY, null);
+  let selected = previous;
   selected = Array.isArray(selected) ? selected.filter((account) => accounts.some((item) => item.account === account)) : accounts.map((item) => item.account);
   if (!selected.length) selected = accounts.map((item) => item.account);
+  if (Array.isArray(previous) && !sameAccountSet(previous, selected)) clearCompanionFilter();
   localStorage.setItem(PROFILE_ACCOUNTS_KEY, JSON.stringify(selected));
   const box = document.createElement('section');
   box.className = 'global-account-picker';
   box.dataset.globalAccountPicker = '1';
   box.innerHTML = `<p>ACCOUNT ATTIVO</p><details><summary>${selected.length === accounts.length ? 'Tutti gli account' : `${selected.length} account selezionati`}</summary><div class="global-account-options">${accounts.map((item) => `<label><input type="checkbox" value="${esc(item.account)}" ${selected.includes(item.account) ? 'checked' : ''}><span>${esc(item.account)}</span></label>`).join('')}<button type="button" data-apply-global-accounts>Applica selezione</button></div></details>`;
   sidebar.insertBefore(box, sidebar.querySelector('.sidebar-foot'));
+  renderGlobalScopeSummary();
   box.querySelector('[data-apply-global-accounts]').addEventListener('click', () => {
     const values = [...box.querySelectorAll('input:checked')].map((input) => input.value);
     if (!values.length) return;
+    if (!sameAccountSet(values, selected)) clearCompanionFilter();
     localStorage.setItem(PROFILE_ACCOUNTS_KEY, JSON.stringify(values));
     window.location.reload();
   });
@@ -127,7 +179,9 @@ function setActiveNav() {
     ['snapshot', '/', 'Database snapshot'],
     ['profile', '/profile.html', 'Profilo competitivo'],
     ['friends', '/friends.html', 'Friends'],
+    ['synergy', '/synergy.html', 'Team synergy'],
     ['fit', '/fit.html', 'Fit matrix'],
+    ['champion', '/champion.html', 'Champion detail'],
     ['allocation', '/allocation.html', 'Exact allocation'],
     ['blacklist', '/blacklist.html', 'Blacklist'],
     ['audit', '/audit.html', 'Match audit'],
@@ -246,29 +300,88 @@ async function loadProfile() {
     const select = $('#companion-profile'); const mode = $('#companion-mode'); const status = $('#companion-filter-status');
     if (!select) return;
     const groups = savedProfileGroups();
-    const current = (() => { try { return JSON.parse(localStorage.getItem(COMPANION_FILTER_KEY) || 'null'); } catch { return null; } })();
+    let current = readCompanionFilter();
+    if (current && !groups[current.name]) { clearCompanionFilter(); current = null; }
     select.innerHTML = '<option value="">Nessun filtro</option>' + Object.entries(groups).map(([name, group]) => `<option value="${esc(name)}">${esc(name)} · ${group.length} account</option>`).join('');
-    if (current && groups[current.name]) { select.value = current.name; mode.value = current.mode; status.textContent = current.mode === 'exclude' ? `Attivo: esclusi i game con ${current.name}.` : `Attivo: mostrati solo i game esclusivi di ${current.name}.`; }
-    else status.textContent = 'Nessun filtro di presenza attivo.';
+    status.classList.remove('is-active', 'is-warning');
+    if (current) {
+      select.value = current.name;
+      mode.value = current.mode;
+      status.classList.add('is-active');
+      status.textContent = current.mode === 'exclude'
+        ? `Attivo: esclude ogni game in cui compare ${current.name}. Si applica alle analisi del profilo e alle altre pagine.`
+        : `Attivo: mostra solo i game in cui compare ${current.name}, senza altri account tracciati.`;
+    } else status.textContent = 'Nessun filtro attivo: tutte le partite del profilo selezionato sono incluse.';
+    renderGlobalScopeSummary();
   };
   renderSavedProfiles(); renderPicker(); renderCompanionFilter();
   $('#apply-companion-filter')?.addEventListener('click', async () => {
     const name = $('#companion-profile').value; const groups = savedProfileGroups();
     if (!name || !groups[name]?.length) return;
+    const targetAccounts = normalizedAccounts(groups[name]);
+    const status = $('#companion-filter-status');
+    if (targetAccounts.some((account) => selected.includes(account))) {
+      if (status) {
+        status.classList.remove('is-active');
+        status.classList.add('is-warning');
+        status.textContent = `Filtro non applicato: ${name} contiene account del profilo analizzato. Scegli un profilo diverso per evitare di escludere i tuoi stessi game.`;
+      }
+      return;
+    }
     const mode = $('#companion-mode').value;
-    localStorage.setItem(COMPANION_FILTER_KEY, JSON.stringify({ name, accounts: groups[name], mode }));
+    localStorage.setItem(COMPANION_FILTER_KEY, JSON.stringify({ name, accounts: targetAccounts, mode, profile_accounts: normalizedAccounts(selected) }));
     renderCompanionFilter(); await renderProfile(selected);
   });
-  $('#clear-companion-filter')?.addEventListener('click', async () => { localStorage.removeItem(COMPANION_FILTER_KEY); renderCompanionFilter(); await renderProfile(selected); });
-  const refresh = async () => { const values = [...picker.querySelectorAll('input:checked')].map((input) => input.value); if (values.length) { selected = values; activeProfile = null; localStorage.setItem(PROFILE_ACCOUNTS_KEY, JSON.stringify(values)); renderSavedProfiles(); const count = $('#account-selection-count'); if (count) count.textContent = `${selected.length} di ${accountsData.items.length} selezionati`; const selectAll = $('#select-all-accounts'); if (selectAll) selectAll.textContent = selected.length === accountsData.items.length ? 'Deseleziona tutti' : 'Seleziona tutti'; } await renderProfile(selected); };
+  $('#clear-companion-filter')?.addEventListener('click', async () => { clearCompanionFilter(); renderCompanionFilter(); await renderProfile(selected); });
+  const refresh = async () => {
+    const values = [...picker.querySelectorAll('input:checked')].map((input) => input.value);
+    if (values.length) {
+      const changed = !sameAccountSet(values, selected);
+      if (changed) clearCompanionFilter();
+      selected = values; activeProfile = null;
+      localStorage.setItem(PROFILE_ACCOUNTS_KEY, JSON.stringify(values));
+      renderSavedProfiles(); renderCompanionFilter();
+      const count = $('#account-selection-count'); if (count) count.textContent = `${selected.length} di ${accountsData.items.length} selezionati`;
+      const selectAll = $('#select-all-accounts'); if (selectAll) selectAll.textContent = selected.length === accountsData.items.length ? 'Deseleziona tutti' : 'Seleziona tutti';
+    }
+    await renderProfile(selected);
+  };
   picker.querySelectorAll('input').forEach((input) => input.addEventListener('change', refresh));
-  $('#select-all-accounts').addEventListener('click', async () => { const all = selected.length !== accountsData.items.length; picker.querySelectorAll('input').forEach((input) => { input.checked = all; }); selected = all ? accountsData.items.map((item) => item.account) : [accountsData.items[0].account]; activeProfile = null; localStorage.setItem(PROFILE_ACCOUNTS_KEY, JSON.stringify(selected)); renderSavedProfiles(); await renderProfile(selected); });
+  $('#select-all-accounts').addEventListener('click', async () => {
+    const all = selected.length !== accountsData.items.length;
+    const next = all ? accountsData.items.map((item) => item.account) : [accountsData.items[0].account];
+    if (!sameAccountSet(next, selected)) clearCompanionFilter();
+    picker.querySelectorAll('input').forEach((input) => { input.checked = all; });
+    selected = next; activeProfile = null;
+    localStorage.setItem(PROFILE_ACCOUNTS_KEY, JSON.stringify(selected));
+    renderSavedProfiles(); renderCompanionFilter();
+    await renderProfile(selected);
+  });
   const savedProfiles = $('#saved-profiles');
-  if (savedProfiles) savedProfiles.addEventListener('click', async (event) => { const button = event.target.closest('[data-profile-name]'); if (!button) return; const groups = savedProfileGroups(); activeProfile = button.dataset.profileName; selected = groups[activeProfile].filter((account) => valid.has(account)); localStorage.setItem(PROFILE_ACCOUNTS_KEY, JSON.stringify(selected)); renderSavedProfiles(); renderPicker(); picker.querySelectorAll('input').forEach((input) => input.addEventListener('change', refresh)); $('#select-all-accounts').addEventListener('click', async () => { const all = selected.length !== accountsData.items.length; picker.querySelectorAll('input').forEach((input) => { input.checked = all; }); selected = all ? accountsData.items.map((item) => item.account) : [accountsData.items[0].account]; activeProfile = null; localStorage.setItem(PROFILE_ACCOUNTS_KEY, JSON.stringify(selected)); renderSavedProfiles(); await renderProfile(selected); }); await renderProfile(selected); });
+  if (savedProfiles) savedProfiles.addEventListener('click', async (event) => {
+    const button = event.target.closest('[data-profile-name]'); if (!button) return;
+    const groups = savedProfileGroups();
+    clearCompanionFilter();
+    activeProfile = button.dataset.profileName;
+    selected = groups[activeProfile].filter((account) => valid.has(account));
+    localStorage.setItem(PROFILE_ACCOUNTS_KEY, JSON.stringify(selected));
+    renderSavedProfiles(); renderPicker(); renderCompanionFilter();
+    picker.querySelectorAll('input').forEach((input) => input.addEventListener('change', refresh));
+    $('#select-all-accounts').addEventListener('click', async () => {
+      const all = selected.length !== accountsData.items.length;
+      const next = all ? accountsData.items.map((item) => item.account) : [accountsData.items[0].account];
+      if (!sameAccountSet(next, selected)) clearCompanionFilter();
+      picker.querySelectorAll('input').forEach((input) => { input.checked = all; });
+      selected = next; activeProfile = null;
+      localStorage.setItem(PROFILE_ACCOUNTS_KEY, JSON.stringify(selected));
+      renderSavedProfiles(); renderCompanionFilter(); await renderProfile(selected);
+    });
+    await renderProfile(selected);
+  });
   const saveForm = $('#save-profile-form');
-  if (saveForm) saveForm.addEventListener('submit', async (event) => { event.preventDefault(); const name = $('#profile-name').value.trim(); if (!name || !selected.length) return; const groups = savedProfileGroups(); groups[name] = [...selected]; saveProfileGroups(groups); activeProfile = name; renderSavedProfiles(); await renderProfile(selected); });
+  if (saveForm) saveForm.addEventListener('submit', async (event) => { event.preventDefault(); const name = $('#profile-name').value.trim(); if (!name || !selected.length) return; const groups = savedProfileGroups(); groups[name] = [...selected]; saveProfileGroups(groups); activeProfile = name; renderSavedProfiles(); renderCompanionFilter(); await renderProfile(selected); });
   const deleteButton = $('#delete-profile');
-  if (deleteButton) deleteButton.addEventListener('click', async () => { if (!activeProfile) return; const groups = savedProfileGroups(); delete groups[activeProfile]; saveProfileGroups(groups); activeProfile = null; $('#profile-name').value = ''; renderSavedProfiles(); });
+  if (deleteButton) deleteButton.addEventListener('click', async () => { if (!activeProfile) return; const groups = savedProfileGroups(); delete groups[activeProfile]; saveProfileGroups(groups); activeProfile = null; $('#profile-name').value = ''; renderSavedProfiles(); renderCompanionFilter(); });
   await renderProfile(selected);
 }
 async function renderProfile(accounts) {
@@ -407,12 +520,164 @@ document.addEventListener('keydown', (event) => {
   event.preventDefault();
   $('#reload-friends')?.click();
 });
+function matchupRow(item, direction, index) {
+  const games = Number(item.games) || 0;
+  const losses = Number(item.losses_to) || 0;
+  const wins = Number(item.wins_against) || 0;
+  const posterior = Number.isFinite(Number(item.posterior_win_rate)) ? Number(item.posterior_win_rate) : Number(item.win_rate_against) || 0;
+  const lower = Number.isFinite(Number(item.credible_lower_90)) ? Number(item.credible_lower_90) : posterior;
+  const upper = Number.isFinite(Number(item.credible_upper_90)) ? Number(item.credible_upper_90) : posterior;
+  const confidence = Number(item.direction_confidence) || 0;
+  const evidence = Number(item.effective_evidence) || 0;
+  const decidingCount = direction === 'ban' ? losses : wins;
+  const decidingLabel = direction === 'ban' ? 'nostre sconfitte' : 'nostre vittorie';
+  return `<article class="matchup-row" title="Score matchup ${fixed(item.matchup_score, 2)} · evidenza effettiva ${fixed(evidence, 1)} · copertura qualità ${pct(item.quality_coverage, 0)}"><span class="matchup-rank">${String(index + 1).padStart(2, '0')}</span><div class="champion-cell">${avatar({champion: item.champion, icon_url: item.icon_url})}<div><strong>${esc(item.champion)}</strong><small>${games} game · ${decidingCount} ${decidingLabel} · ${fixed(evidence, 1)} evidenza effettiva</small></div></div><div class="matchup-value"><b>${pct(posterior, 0)}</b><span>fit matchup · 90% ${pct(lower, 0)}–${pct(upper, 0)} · ${pct(confidence, 0)} conf.</span></div></article>`;
+}
+
+function renderMatchupList(items, direction) {
+  const key = direction === 'ban' ? 'losses_to' : 'wins_against';
+  const relevant = (Array.isArray(items) ? items : []).filter((item) => Number(item[key]) > 0);
+  if (!relevant.length) return `<p class="empty">Nessuna evidenza sufficiente per questo verso del matchup.</p>`;
+  return relevant.map((item, index) => matchupRow(item, direction, index)).join('');
+}
+
+function renderMatchups(data) {
+  const filter = $('#matchup-champion-filter');
+  const scope = $('#matchup-scope');
+  const roleNote = $('#matchup-role-note');
+  const available = Array.isArray(data.available_champions) ? [...data.available_champions] : [];
+  if (data.champion !== 'ALL' && !available.some((item) => item.champion === data.champion)) available.unshift({champion: data.champion, games: data.games || 0});
+  if (filter) {
+    filter.innerHTML = `<option value="ALL">Tutti i champion giocati · ${data.games || 0} game</option>` + available.map((item) => `<option value="${esc(item.champion)}">${esc(item.champion)} · ${item.games} game</option>`).join('');
+    filter.value = data.champion;
+    filter.onchange = () => {
+      const next = new URLSearchParams(window.location.search);
+      if (filter.value === 'ALL') next.delete('champion');
+      else next.set('champion', filter.value);
+      const query = next.toString();
+      window.location.assign(`/champion.html${query ? `?${query}` : ''}`);
+    };
+  }
+  if (scope) scope.textContent = `${data.games_with_opponents || 0} di ${data.games || 0} game con roster avversario · baseline ${pct(data.baseline_win_rate ?? 50, 1)}`;
+  if (roleNote) roleNote.textContent = data.role && data.role !== 'ALL' ? `Filtro ruolo: ${data.role}` : 'Tutti i ruoli';
+  const losesTo = $('#matchup-loses-to');
+  const beats = $('#matchup-beats');
+  if (losesTo) losesTo.innerHTML = renderMatchupList(data.loses_to, 'ban');
+  if (beats) beats.innerHTML = renderMatchupList(data.beats, 'safe');
+}
+
+async function loadAggregateChampionDetail() {
+  const data = await api(`/api/matchups?${scopedQuery()}`);
+  const games = Number(data.games) || 0;
+  const wins = Number(data.wins) || 0;
+  const opponents = Number(data.games_with_opponents) || 0;
+  $('#champion-title').textContent = 'Tutti i champion.';
+  $('#champion-copy').textContent = 'Panoramica aggregata: scegli un champion solo quando vuoi restringere il confronto a una scelta specifica.';
+  $('#champion-scope').textContent = 'Nessun filtro champion';
+  $('#champion-window').textContent = 'ban aggregato sullo storico osservato';
+  $('#champion-metrics').innerHTML = [
+    profileMetric(games, 'game personali'),
+    profileMetric(`${wins}–${games - wins}`, 'vittorie · sconfitte'),
+    profileMetric(pct(data.win_rate || 0, 1), 'win rate personale'),
+    profileMetric(opponents, 'game con roster avversario'),
+  ].join('');
+  renderMatchups(data);
+  $('#champion-roles').innerHTML = '<p class="empty">Il dettaglio per ruolo compare quando selezioni un champion.</p>';
+  $('#champion-annotations').innerHTML = `<article class="profile-row"><header><strong>${opponents} roster identificati</strong><span>${games} game totali</span></header><small>La classifica ban usa tutte le scelte champion nel perimetro attivo.</small></article>`;
+  $('#champion-recent').innerHTML = '<p class="empty">Seleziona un champion per vedere la traccia delle ultime partite.</p>';
+}
+
 async function loadChampionDetail() {
   const title = $('#champion-title'); if (!title) return;
-  const query = new URLSearchParams(window.location.search); const champion = query.get('champion') || ''; if (!champion) { title.textContent = 'Champion non specificato'; return; }
+  const query = new URLSearchParams(window.location.search); const champion = query.get('champion') || ''; if (!champion) return loadAggregateChampionDetail();
   const accounts = readStoredJson(PROFILE_ACCOUNTS_KEY, []); (Array.isArray(accounts) ? accounts : []).forEach((account) => query.append('account', account));
   try { const companion = JSON.parse(localStorage.getItem(COMPANION_FILTER_KEY) || 'null'); if (companion?.accounts?.length && ['exclude', 'only'].includes(companion.mode)) { companion.accounts.forEach((account) => query.append('companion_account', account)); query.set('companion_mode', companion.mode); } } catch (_) { /* ignore malformed local filter */ }
-  const data = await api(`/api/champion?${query.toString()}`); const s = data.stats; title.textContent = `${data.champion}.`; $('#champion-copy').textContent = data.fit ? `Fit globale ${pct(data.fit.account_adjusted_fit_score, 1)} · ${data.fit.games_observed} game osservati · intervallo 90% ${interval90(data.fit.credible_lower_90, data.fit.credible_upper_90)}.` : 'Questo champion non ha ancora un fit globale calcolato.'; $('#champion-scope').textContent = accounts.length ? `${accounts.length} account selezionati` : 'tutti gli account del database'; $('#champion-metrics').innerHTML = [profileMetric(s.games, 'game personali'), profileMetric(`${s.wins}–${s.games - s.wins}`, 'vittorie · sconfitte'), profileMetric(pct(s.win_rate, 1), 'win rate personale'), profileMetric(s.invincible_games + s.carryable_losses, 'annotazioni carryability')].join(''); $('#champion-roles').innerHTML = data.roles.length ? data.roles.map((item) => `<article class="profile-row"><header><strong>${esc(item.role)}</strong><span>${item.games_observed} game · ${pct(item.account_adjusted_fit_score, 0)} fit</span></header><div class="profile-rail"><i style="width:${Math.min(Number(item.account_adjusted_fit_score), 100)}%"></i></div><small>Intervallo 90%: ${interval90(item.credible_lower_90, item.credible_upper_90)}</small></article>`).join('') : '<p class="empty">Nessuna evidenza globale.</p>'; $('#champion-annotations').innerHTML = `<article class="profile-row"><header><strong>${s.invincible_games} invincibili</strong><span>${s.carryable_losses} loss carryable</span></header><small>${s.afk_games} con AFK · ${s.griefer_games} con griefer</small></article>`; $('#champion-recent').innerHTML = data.recent.length ? data.recent.map((item) => `<article class="recent-row"><span class="recent-result ${item.win ? 'win' : 'loss'}">${item.win ? 'WIN' : 'LOSS'}</span><strong>${esc(item.role)}</strong><span>${esc(item.account)}</span><time>${new Date(item.date).toLocaleDateString('it-IT')}</time></article>`).join('') : '<p class="empty">Nessun match trovato.</p>';
+  const data = await api(`/api/champion?${query.toString()}`); const s = data.stats; title.textContent = `${data.champion}.`; $('#champion-copy').textContent = data.fit ? `Fit globale ${pct(data.fit.account_adjusted_fit_score, 1)} · ${data.fit.games_observed} game osservati · intervallo 90% ${interval90(data.fit.credible_lower_90, data.fit.credible_upper_90)}.` : 'Questo champion non ha ancora un fit globale calcolato.'; $('#champion-scope').textContent = accounts.length ? `${accounts.length} account selezionati` : 'tutti gli account del database'; $('#champion-metrics').innerHTML = [profileMetric(s.games, 'game personali'), profileMetric(`${s.wins}–${s.games - s.wins}`, 'vittorie · sconfitte'), profileMetric(pct(s.win_rate, 1), 'win rate personale'), profileMetric(s.invincible_games + s.carryable_losses, 'annotazioni carryability')].join(''); renderMatchups(data.matchups || {champion: data.champion, available_champions: [], loses_to: [], beats: [], games: 0, games_with_opponents: 0, role: data.role}); $('#champion-roles').innerHTML = data.roles.length ? data.roles.map((item) => `<article class="profile-row"><header><strong>${esc(item.role)}</strong><span>${item.games_observed} game · ${pct(item.account_adjusted_fit_score, 0)} fit</span></header><div class="profile-rail"><i style="width:${Math.min(Number(item.account_adjusted_fit_score), 100)}%"></i></div><small>Intervallo 90%: ${interval90(item.credible_lower_90, item.credible_upper_90)}</small></article>`).join('') : '<p class="empty">Nessuna evidenza globale.</p>'; $('#champion-annotations').innerHTML = `<article class="profile-row"><header><strong>${s.invincible_games} invincibili</strong><span>${s.carryable_losses} loss carryable</span></header><small>${s.afk_games} con AFK · ${s.griefer_games} con griefer</small></article>`; $('#champion-recent').innerHTML = data.recent.length ? data.recent.map((item) => `<article class="recent-row"><span class="recent-result ${item.win ? 'win' : 'loss'}">${item.win ? 'WIN' : 'LOSS'}</span><strong>${esc(item.role)}</strong><span>${esc(item.account)}</span><time>${new Date(item.date).toLocaleDateString('it-IT')}</time></article>`).join('') : '<p class="empty">Nessun match trovato.</p>';
+}
+
+function synergyRow(item, index) {
+  const games = Number(item.games) || 0;
+  const wins = Number(item.wins) || 0;
+  const losses = Number(item.losses) || 0;
+  return `<article class="synergy-row"><span class="matchup-rank">${String(index + 1).padStart(2, '0')}</span><div class="champion-cell">${avatar({champion: item.champion, icon_url: item.icon_url})}<div><strong>${esc(item.champion)}</strong><small>${games} game · ${wins} vittorie · ${losses} sconfitte</small></div></div><div class="matchup-value"><b>${pct(item.win_rate, 0)}</b><span>win rate</span></div></article>`;
+}
+
+function renderSynergyList(items) {
+  return Array.isArray(items) && items.length ? items.map(synergyRow).join('') : '<p class="empty">Nessuna evidenza con la soglia scelta.</p>';
+}
+
+async function loadSynergy() {
+  const better = $('#synergy-better'); const worse = $('#synergy-worse'); if (!better && !worse) return;
+  const championFilter = $('#synergy-champion-filter');
+  const minGames = $('#synergy-min-games');
+  const accountScope = accountQuery();
+  const companionScope = companionQuery();
+  const params = new URLSearchParams([accountScope, companionScope].filter(Boolean).join('&'));
+  params.set('champion', championFilter?.value || 'ALL');
+  params.set('min_games', minGames?.value || '3');
+  let data = await api(`/api/synergy?${params.toString()}`);
+  let fallbackMessage = '';
+  if ((championFilter?.value || 'ALL') === 'ALL' && Number(data.games || 0) === 0) {
+    if (companionScope) {
+      const accountOnly = new URLSearchParams(accountScope);
+      accountOnly.set('champion', 'ALL');
+      accountOnly.set('min_games', minGames?.value || '3');
+      const fallback = await api(`/api/synergy?${accountOnly.toString()}`);
+      if (Number(fallback.games || 0) > 0) {
+        data = fallback;
+        fallbackMessage = 'Il filtro presenza attivo non trova match: mostrato il perimetro account.';
+      }
+    }
+    if (Number(data.games || 0) === 0 && accountScope) {
+      const allAccounts = new URLSearchParams();
+      allAccounts.set('champion', 'ALL');
+      allAccounts.set('min_games', minGames?.value || '3');
+      const fallback = await api(`/api/synergy?${allAccounts.toString()}`);
+      if (Number(fallback.games || 0) > 0) {
+        data = fallback;
+        fallbackMessage = 'La selezione account non trova match: mostrato lo storico completo.';
+      }
+    }
+  }
+  if (championFilter) {
+    const selected = data.champion || 'ALL';
+    championFilter.innerHTML = '<option value="ALL">Tutti i champion giocati</option>' + (data.available_champions || []).map((item) => `<option value="${esc(item.champion)}">${esc(item.champion)} · ${item.games} game</option>`).join('');
+    championFilter.value = selected;
+    if (!championFilter.dataset.bound) { championFilter.dataset.bound = '1'; championFilter.addEventListener('change', loadSynergy); }
+  }
+  if (minGames && !minGames.dataset.bound) { minGames.dataset.bound = '1'; minGames.addEventListener('change', loadSynergy); }
+  const scope = $('#synergy-scope');
+  if (scope) scope.textContent = `${data.games_with_teammates || 0} di ${data.games || 0} game con almeno un compagno identificato`;
+  const summary = $('#synergy-summary');
+  if (summary) summary.textContent = `${data.champion === 'ALL' ? 'Tutti i champion giocati' : `Solo ${data.champion}`} · minimo ${data.min_games} game per compagno`;
+  const filterStatus = $('#synergy-filter-status');
+  if (filterStatus) {
+    const noGames = Number(data.games || 0) === 0;
+    if (fallbackMessage) {
+      filterStatus.innerHTML = `${fallbackMessage} <button type="button" data-clear-synergy-filter>Ripristina filtro</button>`;
+      filterStatus.querySelector('[data-clear-synergy-filter]')?.addEventListener('click', () => {
+        localStorage.removeItem(COMPANION_FILTER_KEY);
+        localStorage.removeItem(PROFILE_ACCOUNTS_KEY);
+        window.location.reload();
+      });
+    } else if (noGames && data.companion_filter_active) {
+      filterStatus.innerHTML = 'Il filtro presenza attivo non trova partite. <button type="button" data-clear-synergy-filter>Rimuovi filtro</button>';
+      filterStatus.querySelector('[data-clear-synergy-filter]')?.addEventListener('click', () => {
+        localStorage.removeItem(COMPANION_FILTER_KEY);
+        loadSynergy();
+      });
+    } else if (noGames && Array.isArray(data.accounts) && data.accounts.length) {
+      filterStatus.innerHTML = 'Gli account selezionati non hanno partite analizzate. <button type="button" data-clear-synergy-scope>Mostra tutti gli account</button>';
+      filterStatus.querySelector('[data-clear-synergy-scope]')?.addEventListener('click', () => {
+        localStorage.removeItem(PROFILE_ACCOUNTS_KEY);
+        window.location.reload();
+      });
+    } else {
+      filterStatus.textContent = '';
+    }
+  }
+  if (better) better.innerHTML = renderSynergyList(data.better_with);
+  if (worse) worse.innerHTML = renderSynergyList(data.worse_with);
 }
 
 async function loadScreen() {
@@ -436,7 +701,7 @@ async function boot() {
   setActiveNav();
   loadSyncStatus();
   window.setInterval(loadSyncStatus, 30000);
-  try { await loadGlobalAccountPicker(); const accountPart = scopedQuery(); const overview = await api(`/api/overview${accountPart ? `?${accountPart}` : ''}`); renderOverview(overview); await Promise.all([loadFit(), loadPlan($('#plan-n')?.value || ''), loadBlacklist(), loadAudit(), loadScreen(), loadProfile(), loadChampionDetail(), loadFriends()]); attachInteractions(); }
+  try { await loadGlobalAccountPicker(); const accountPart = scopedQuery(); const overview = await api(`/api/overview${accountPart ? `?${accountPart}` : ''}`); renderOverview(overview); await Promise.all([loadFit(), loadPlan($('#plan-n')?.value || ''), loadBlacklist(), loadAudit(), loadScreen(), loadProfile(), loadChampionDetail(), loadFriends(), loadSynergy()]); attachInteractions(); }
   catch (error) { const main = document.querySelector('main'); if (main) main.insertAdjacentHTML('afterbegin', `<div class="error-banner"><b>Il database non è raggiungibile.</b><span>${esc(error.message)}</span></div>`); }
 }
 boot();

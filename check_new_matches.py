@@ -16,7 +16,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from urllib.parse import quote
 
-from app import DB_PATH, SCHEMA_PATH
+from app import DB_PATH, SCHEMA_PATH, migrate_match_participant_champions
 from ingest import ingest
 from queue_rules import is_supported_queue
 from riot_sync import (
@@ -60,6 +60,7 @@ def _normalize(account: str, puuid: str, detail: dict) -> tuple[dict | None, lis
         "riot_id": f"{p.get('riotIdGameName', '')}#{p.get('riotIdTagline', '')}",
         "team_id": p.get("teamId", 0),
         "win": bool(p.get("win")),
+        "champion": p.get("championName", ""),
     } for p in info.get("participants", [])]
     return row, participants
 
@@ -106,6 +107,7 @@ def check_account(account: str, key: str, db_path: Path) -> dict:
     connection = storage.connect()
     try:
         storage.initialize()
+        migrate_match_participant_champions(connection)
         connection.execute(
             "INSERT INTO riot_accounts_raw(puuid,account,game_name,tag_line,fetched_at,payload_json) VALUES(?,?,?,?,?,?) "
             "ON CONFLICT(puuid) DO UPDATE SET account=excluded.account,game_name=excluded.game_name,tag_line=excluded.tag_line,fetched_at=excluded.fetched_at,payload_json=excluded.payload_json",
@@ -122,7 +124,18 @@ def check_account(account: str, key: str, db_path: Path) -> dict:
             [(match_id, MATCH_ROUTING, fetched_at, json.dumps(payload, ensure_ascii=False)) for match_id, payload in raw_matches.items()],
         )
         connection.execute("INSERT INTO tracked_account_puuids(puuid,account) VALUES(?,?) ON CONFLICT(puuid) DO UPDATE SET account=excluded.account", (puuid, account))
-        connection.executemany("INSERT OR IGNORE INTO match_participants(match_id,puuid,riot_id,team_id,win) VALUES(?,?,?,?,?)", [(p["match_id"], p["puuid"], p["riot_id"], p["team_id"], int(p["win"])) for p in participants if p["puuid"]])
+        connection.executemany(
+            """INSERT INTO match_participants(match_id,puuid,riot_id,team_id,win,champion)
+               VALUES(?,?,?,?,?,?)
+               ON CONFLICT(match_id,puuid) DO UPDATE SET
+                 riot_id=excluded.riot_id,
+                 team_id=excluded.team_id,
+                 win=excluded.win,
+                 champion=CASE WHEN excluded.champion <> '' THEN excluded.champion
+                               ELSE match_participants.champion END""",
+            [(p["match_id"], p["puuid"], p["riot_id"], p["team_id"], int(p["win"]), p.get("champion", ""))
+             for p in participants if p["puuid"]],
+        )
         connection.commit()
     finally:
         connection.close()
