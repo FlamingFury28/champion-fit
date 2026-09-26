@@ -1,0 +1,128 @@
+/* Loaded after the shared styles: appearance changes never recolor result semantics. */
+:root {
+  --accent: #c9ffb5;
+  --accent-contrast: #102015;
+  --accent-soft: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+:root[data-accent="sky"] { --accent: #8fcbd8; --accent-contrast: #0b2025; --focus: #8fcbd8; }
+:root[data-accent="amber"] { --accent: #f2c66d; --accent-contrast: #261b08; --focus: #f2c66d; }
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f1f5ef;
+  --bg-deep: #e7eee6;
+  --surface: #fcfdfa;
+  --surface-raised: #ffffff;
+  --surface-soft: #e8efe6;
+  --text: #182a23;
+  --text-soft: #40574b;
+  --muted: #596c61;
+  --border: #c4d1c3;
+  --border-strong: #8da48f;
+  --positive: #28633a;
+  --warning: #7b570e;
+  --negative: #ae3f2c;
+  --info: #256372;
+  --accent: #2f623d;
+  --accent-contrast: #ffffff;
+  --focus: #2f623d;
+  --shadow-float: 0 18px 52px #102b2624;
+}
+:root[data-theme="light"][data-accent="sky"] { --accent: #246579; --focus: #246579; }
+:root[data-theme="light"][data-accent="amber"] { --accent: #7c5717; --focus: #7c5717; }
+
+/* The light palette covers shared controls, overlays and each data-page surface. */
+:root[data-theme="light"] .surface { background: linear-gradient(145deg, var(--surface-raised), var(--surface)); }
+:root[data-theme="light"] .app-shell { background: radial-gradient(circle at 80% 0, color-mix(in srgb, var(--accent) 8%, transparent), transparent 28%), linear-gradient(color-mix(in srgb, var(--border) 30%, transparent) 1px, transparent 1px), linear-gradient(90deg, color-mix(in srgb, var(--border) 30%, transparent) 1px, transparent 1px), var(--bg); background-size: auto, 72px 72px, 72px 72px, auto; }
+:root[data-theme="light"] :is(.app-topbar, .landing-preview__rail) { background: var(--bg-deep); }
+:root[data-theme="light"] .app-topbar > .scope-bar { background: transparent; }
+:root[data-theme="light"] .app-nav section > p { color: var(--muted); }
+:root[data-theme="light"] .app-nav a { color: var(--text-soft); }
+:root[data-theme="light"] .app-nav a:hover { color: var(--text); background: var(--surface-soft); }
+:root[data-theme="light"] .app-nav a.active { color: var(--accent); border-left-color: var(--accent); background: var(--accent-soft); }
+:root[data-theme="light"] .landing-preview { background: var(--surface); box-shadow: 0 32px 70px #1e392321, 0 0 0 12px #c3d2c22b; }
+:root[data-theme="light"] :is(.landing-preview__rail i, .preview-bar i, .role-list__rail, .evidence-bar__rail, .allocation-bars article > i) { background: var(--border); }
+:root[data-theme="light"] .landing-preview__rail i:nth-of-type(1) { background: var(--accent); }
+:root[data-theme="light"] .role-list__rail span { background: linear-gradient(90deg, color-mix(in srgb, var(--positive) 65%, var(--surface)), var(--positive)); }
+:root[data-theme="light"] :is(.decision-switcher__item, .decision-summary, .decision-card, .recommendation-card, .matchup-row, .friend-group-list article) { background: var(--surface); }
+:root[data-theme="light"] .decision-hub { background: radial-gradient(circle at 14% 0, var(--accent-soft), transparent 40%), var(--surface); }
+:root[data-theme="light"] .answer-panel { background: radial-gradient(circle at 0 0, var(--accent-soft), transparent 40%), var(--surface); }
+:root[data-theme="light"] :is(input, select, textarea, .filter-bar > label.filter-toggle, .account-chip) { background: var(--surface); }
+:root[data-theme="light"] :is(input, textarea)::placeholder { color: var(--muted); opacity: 1; }
+:root[data-theme="light"] :is(.preset-buttons, .segmented-control, .data-table-wrap thead th) { background: var(--surface-soft); }
+:root[data-theme="light"] .champion-avatar { background: radial-gradient(circle, var(--surface-soft), var(--bg-deep)); }
+:root[data-theme="light"] .data-table-wrap tbody tr:hover { background: var(--accent-soft); }
+:root[data-theme="light"] .skeleton span { background: linear-gradient(90deg, var(--surface-soft) 20%, var(--border) 45%, var(--surface-soft) 70%); background-size: 200% 100%; }
+:root[data-theme="light"] :is(.dialog-content, .drawer-content) { background: var(--surface-raised); box-shadow: 0 24px 80px #102b2633; }
+:root[data-theme="light"] .dialog-overlay { background: #132d2659; }
+:root[data-theme="light"] :is(.toast-root, .tooltip-content, .orbit-label) { box-shadow: 0 12px 38px #102b261c; }
+
+/* Semantic colors keep their meaning under every accent, with readable light variants. */
+:root[data-theme="light"] :is(.status-badge[data-tone="positive"], .result-block--win) { border-color: color-mix(in srgb, var(--positive) 38%, transparent); background: color-mix(in srgb, var(--positive) 6%, transparent); }
+:root[data-theme="light"] .status-badge[data-tone="warning"] { border-color: color-mix(in srgb, var(--warning) 38%, transparent); background: color-mix(in srgb, var(--warning) 6%, transparent); }
+:root[data-theme="light"] :is(.status-badge[data-tone="negative"], .result-block--loss, .recommendation-card[data-conflict="true"], .answer-caveat[data-tone="warning"], .state-card--error) { border-color: color-mix(in srgb, var(--negative) 38%, transparent); background: color-mix(in srgb, var(--negative) 6%, var(--surface)); }
+:root[data-theme="light"] :is(.status-badge[data-tone="info"], .scope-refresh-banner, .info-callout) { border-color: color-mix(in srgb, var(--info) 38%, transparent); background: color-mix(in srgb, var(--info) 5%, transparent); }
+:root[data-theme="light"] .blacklist-column--strong { border-top-color: var(--negative); }
+
+/* Selection and navigation belong to the accent, independently from wins/losses. */
+:root .account-chip--active,
+:root .account-options label:has(input:checked) { border-color: color-mix(in srgb, var(--accent) 52%, var(--border)); background: var(--accent-soft); }
+:root :is(.eyebrow, .text-link) { color: var(--accent); }
+:root :is(.button--secondary, .button--ghost):hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+:root .app-nav a.active { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+:root :is(.account-options, .switch-row) small { color: var(--text-soft); }
+:root :is(.account-chip svg, .checkbox-mark svg) { color: var(--accent); }
+:root :is(.preset-buttons, .segmented-control) button[aria-pressed="true"] { color: var(--accent-contrast); background: var(--accent); }
+:root :is(input[type="range"], .filter-toggle input, .switch-row input) { accent-color: var(--accent); }
+
+.appearance-settings > .section-heading { margin-bottom: 12px; }
+.appearance-controls { display: grid; gap: 22px; }
+.appearance-group { min-width: 0; margin: 0; padding: 0; border: 0; }
+.appearance-group legend { margin-bottom: 9px; padding: 0; color: var(--text-soft); font: 650 12px/1.5 var(--font-sans); }
+.appearance-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.appearance-option { position: relative; min-width: 116px; min-height: 48px; padding: 10px 12px; display: inline-flex; flex: 1 1 116px; align-items: center; gap: 9px; border: 1px solid var(--border-strong); border-radius: var(--radius-control); color: var(--text-soft); background: var(--surface); font-size: 12px; cursor: pointer; transition: border-color .16s ease, background .16s ease, color .16s ease; }
+.appearance-option input { position: absolute; z-index: 1; inset: 0; width: 100%; height: 100%; min-height: 0; margin: 0; padding: 0; border: 0; opacity: 0; cursor: pointer; }
+.appearance-option:hover { border-color: var(--accent); }
+.appearance-option:has(input:checked) { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.appearance-option:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 3px; }
+.appearance-option > svg { width: 16px; height: 16px; flex: 0 0 auto; }
+.appearance-option__check { margin-left: auto; visibility: hidden; }
+.appearance-option:has(input:checked) .appearance-option__check { visibility: visible; }
+.appearance-swatch { width: 16px; height: 16px; flex: 0 0 auto; border: 1px solid color-mix(in srgb, var(--text) 22%, transparent); border-radius: 50%; background: #c9ffb5; }
+.appearance-swatch[data-swatch="sky"] { background: #8fcbd8; }
+.appearance-swatch[data-swatch="amber"] { background: #f2c66d; }
+:root[data-theme="light"] .appearance-swatch[data-swatch="mint"] { background: #2f623d; }
+:root[data-theme="light"] .appearance-swatch[data-swatch="sky"] { background: #246579; }
+:root[data-theme="light"] .appearance-swatch[data-swatch="amber"] { background: #7c5717; }
+.appearance-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; padding-top: 17px; border-top: 1px solid var(--border); }
+.appearance-note { flex: 1 1 240px; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.appearance-trigger { flex: 0 0 auto; }
+
+@supports not (backdrop-filter: blur(1px)) {
+  :root[data-theme="light"] .app-topbar { background: var(--surface); }
+}
+
+/* Compact spacing preserves all interactive controls at their 44px minimum. */
+:root[data-density="compact"] .page-stack { gap: 20px; }
+:root[data-density="compact"] .app-content main { padding-block: 30px 64px; }
+:root[data-density="compact"] .surface { padding: 20px; }
+:root[data-density="compact"] .section-heading { margin-bottom: 18px; }
+:root[data-density="compact"] .page-header { min-height: 116px; padding-bottom: 18px; }
+:root[data-density="compact"] .metric-card { min-height: 112px; padding: 16px; }
+:root[data-density="compact"] .metric-card > strong { margin-top: 17px; }
+:root[data-density="compact"] .data-table-wrap :is(th, td) { padding: 10px 12px; }
+:root[data-density="compact"] .filter-bar { min-height: 76px; padding: 10px 12px; gap: 10px; }
+:root[data-density="compact"] :is(.recommendation-card__body, .recommendation-card__head) { padding-block: 14px; }
+:root[data-density="compact"] .appearance-controls { gap: 17px; }
+:root[data-density="compact"] .appearance-option { min-height: 44px; padding-block: 8px; }
+
+@media (max-width: 620px) {
+  .appearance-option { min-width: 100px; flex-basis: 100px; padding-inline: 10px; gap: 7px; }
+  .appearance-dialog { padding: 20px; }
+  :root[data-density="compact"] .surface { padding: 18px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+}

@@ -2,7 +2,8 @@
 """Check every tracked Riot account for newly played Summoner's Rift matches.
 
 This is deliberately separate from the historical importer: it refreshes only
-the first Match-V5 page and downloads details only for IDs not already saved.
+pages recent Match-V5 IDs until it reaches locally saved history, reuses saved
+details, and retries raw matches that were never materialized into the analysis table.
 """
 from __future__ import annotations
 
@@ -11,103 +12,322 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import os
 import sqlite3
+import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
-from tempfile import NamedTemporaryFile
+from typing import Mapping
 from urllib.parse import quote
 
-from app import DB_PATH, SCHEMA_PATH, migrate_match_participant_champions
-from ingest import ingest
-from queue_rules import is_supported_queue
+from app import DB_PATH, SCHEMA_PATH
 from riot_sync import (
-    ACCOUNT_ROUTING,
+    AccountIdentityEvidence,
     MATCH_ROUTING,
+    RiotAPIError,
+    SyncActivityMarker,
     TRACKED_ACCOUNTS,
+    dedupe_match_ids,
+    identity_evidence,
+    initialize_ingestion_database,
+    normalize_match_detail,
+    normalize_riot_id,
+    record_verified_account_identity,
     riot_get,
     riot_id,
+    upsert_match_participants,
 )
 from storage import SQLiteStorage
+from account_identity import AccountIdentityConflict, canonical_account_name, reconcile_account_identity
+from riot_sync import account_raw_matches, persist_account_materialization
 
 
-def _normalize(account: str, puuid: str, detail: dict) -> tuple[dict | None, list[dict]]:
-    info = detail.get("info", {})
-    metadata = detail.get("metadata", {})
-    if info.get("mapId") != 11 or not is_supported_queue(info.get("queueId")):
-        return None, []
-    participant = next((p for p in info.get("participants", []) if p.get("puuid") == puuid), None)
-    if not participant:
-        return None, []
-    from app import normalize_role
-    game_start = int(info.get("gameStartTimestamp", 0))
-    date = datetime.fromtimestamp(game_start / 1000, timezone.utc).isoformat() if game_start else datetime.now(timezone.utc).isoformat()
-    row = {
-        "account": account,
-        "match_id": metadata.get("matchId"),
-        "date": date,
-        "patch": str(info.get("gameVersion", "")),
-        "queue": str(info.get("queueId", "Unknown")),
-        "champion": participant.get("championName", "Unknown"),
-        "role": normalize_role(str(participant.get("teamPosition") or "INVALID").upper()),
-        "identity_resolution": "riot_api",
-        "duration_minutes": float(info.get("gameDuration", 0)) / 60,
-        "win": bool(participant.get("win")),
-        "match_quality_score": 0.95 if float(info.get("gameDuration", 0)) / 60 >= 20 else 0.45,
-        "reason": "Imported from Riot Match-V5; duration model v2",
-    }
-    participants = [{
-        "match_id": metadata.get("matchId"),
-        "puuid": p.get("puuid", ""),
-        "riot_id": f"{p.get('riotIdGameName', '')}#{p.get('riotIdTagline', '')}",
-        "team_id": p.get("teamId", 0),
-        "win": bool(p.get("win")),
-        "champion": p.get("championName", ""),
-    } for p in info.get("participants", [])]
-    return row, participants
+_API_REQUEST_INTERVAL = 1.22  # Below 100 requests per rolling 120 seconds per key.
+_RATE_LOCK_REGISTRY_LOCK = threading.Lock()
+_RATE_LOCKS: dict[str, threading.Lock] = {}
+_RATE_LAST_STARTED: dict[str, float] = {}
 
 
-def check_account(account: str, key: str, db_path: Path) -> dict:
-    game_name, tag_line = riot_id(account)
-    identity = riot_get(f"/riot/account/v1/accounts/by-riot-id/{quote(game_name, safe='')}/{quote(tag_line, safe='')}", key)
-    puuid = str(identity["puuid"])
-    connection = sqlite3.connect(db_path)
+def _riot_get_limited(path: str, api_key: str) -> object:
+    """Serialize calls per key and stay within the supplied application limits."""
+    with _RATE_LOCK_REGISTRY_LOCK:
+        key_lock = _RATE_LOCKS.setdefault(api_key, threading.Lock())
+    with key_lock:
+        last_started = _RATE_LAST_STARTED.get(api_key)
+        if last_started is not None:
+            delay = _API_REQUEST_INTERVAL - (time.monotonic() - last_started)
+            if delay > 0:
+                time.sleep(delay)
+        _RATE_LAST_STARTED[api_key] = time.monotonic()
+        return riot_get(path, api_key)
+
+
+def _known_match_ids_for_puuid(connection, puuid: str) -> set[str]:
+    """Read saved match IDs for this PUUID and its established identity group."""
+    puuids = {str(puuid).strip()} - {""}
+    identity = connection.execute(
+        "SELECT identity_id FROM riot_identity_puuids WHERE puuid=?", (puuid,),
+    ).fetchone()
+    if identity:
+        puuids.update(
+            str(row["puuid"])
+            for row in connection.execute(
+                "SELECT puuid FROM riot_identity_puuids WHERE identity_id=?",
+                (identity["identity_id"],),
+            )
+        )
+    ids: list[str] = []
+    ordered_puuids = sorted(puuids)
+    for offset in range(0, len(ordered_puuids), 400):
+        chunk = ordered_puuids[offset:offset + 400]
+        placeholders = ",".join("?" for _ in chunk)
+        for row in connection.execute(
+            f"SELECT match_ids_json FROM riot_match_list_raw WHERE puuid IN ({placeholders})",
+            tuple(chunk),
+        ):
+            try:
+                values = json.loads(row["match_ids_json"])
+            except (TypeError, ValueError, json.JSONDecodeError):
+                values = []
+            if isinstance(values, list):
+                ids.extend(values)
+    return set(dedupe_match_ids(ids))
+
+
+def _retry_detail_ids(
+    connection, known_ids: set[str], account: str, puuid: str,
+) -> tuple[list[str], list[str]]:
+    """Return retained materialization retries and their provider refetch subset.
+
+    The queue is independent from the recent Match-V5 pages so an incomplete
+    historical item remains recoverable after it falls outside their overlap.
+    """
+    retry = []
+    refetch = []
+    account_scope = {str(account).strip(), canonical_account_name(connection, account)} - {""}
+    identity = connection.execute(
+        "SELECT identity_id FROM riot_identity_puuids WHERE puuid=?", (puuid,),
+    ).fetchone()
+    if identity:
+        current = connection.execute(
+            "SELECT account FROM riot_account_identities WHERE identity_id=?",
+            (identity["identity_id"],),
+        ).fetchone()
+        if current and current["account"]:
+            account_scope.add(str(current["account"]))
+    scope_params = tuple(sorted(account_scope))
+    placeholders = ",".join("?" for _ in scope_params)
+    for match_id in sorted(known_ids):
+        raw = connection.execute(
+            "SELECT payload_json FROM riot_match_raw WHERE match_id=?", (match_id,),
+        ).fetchone()
+        try:
+            cached = json.loads(raw["payload_json"]) if raw else None
+        except (TypeError, ValueError, json.JSONDecodeError):
+            cached = None
+        states = {
+            str(row["status"])
+            for row in connection.execute(
+                f"SELECT status FROM riot_match_materialization "
+                f"WHERE match_id=? AND account IN ({placeholders})",
+                (match_id, *scope_params),
+            )
+        }
+        materialized = connection.execute(
+            f"SELECT 1 FROM match_quality "
+            f"WHERE match_id=? AND account IN ({placeholders}) LIMIT 1",
+            (match_id, *scope_params),
+        ).fetchone()
+        missing_raw = not isinstance(cached, dict) or not cached.get("info")
+        invalid = "invalid_payload" in states
+        needs_materialization = (
+            missing_raw or invalid or "identity_unresolved" in states
+            or (not states and materialized is None)
+            or ("eligible" in states and materialized is None)
+            or ("materialized" in states and materialized is None)
+        )
+        if needs_materialization:
+            retry.append(match_id)
+        if missing_raw or invalid:
+            refetch.append(match_id)
+    return retry, refetch
+
+
+def _fetch_match_ids_until_overlap(puuid: str, api_key: str, known_ids: set[str]) -> list[str]:
+    """Fetch newest ID pages through the first page containing a saved match."""
+    ids: list[str] = []
+    start = 0
+    while True:
+        batch = _riot_get_limited(
+            f"/lol/match/v5/matches/by-puuid/{quote(puuid, safe='')}/ids?start={start}&count=100",
+            api_key,
+        )
+        if not isinstance(batch, list):
+            raise RuntimeError("Risposta match IDs inattesa da Match-V5")
+        page_ids = dedupe_match_ids(batch)
+        previous_count = len(ids)
+        ids = dedupe_match_ids([*ids, *page_ids])
+        if known_ids.intersection(page_ids) or len(batch) < 100:
+            return ids
+        if len(ids) == previous_count:
+            raise RuntimeError("Match-V5 ha restituito una pagina piena senza nuovi ID")
+        start += len(batch)
+
+
+def _stored_accounts(db_path: Path) -> tuple[str, ...]:
+    """Use saved Riot account labels when no explicit account scope is configured."""
+    resolved_path = Path(db_path).resolve(strict=True)
+    connection = sqlite3.connect(f"{resolved_path.as_uri()}?mode=ro", uri=True)
     try:
-        old = connection.execute("SELECT match_ids_json FROM riot_match_list_raw WHERE account=?", (account,)).fetchone()
-        known_ids = set(json.loads(old[0])) if old else set()
+        return tuple(
+            str(row[0])
+            for row in connection.execute(
+                "SELECT DISTINCT account FROM riot_match_list_raw ORDER BY account"
+            )
+            if row[0]
+        )
     finally:
         connection.close()
 
-    recent = riot_get(f"/lol/match/v5/matches/by-puuid/{quote(puuid, safe='')}/ids?start=0&count=100", key)
-    ids = [str(match_id) for match_id in recent]
-    new_ids = [match_id for match_id in ids if match_id not in known_ids]
-    raw_matches: dict[str, dict] = {}
-    rows: list[dict] = []
-    participants: list[dict] = []
-    for match_id in new_ids:
-        detail = riot_get(f"/lol/match/v5/matches/{quote(match_id, safe='')}", key)
-        raw_matches[match_id] = detail
-        row, match_participants = _normalize(account, puuid, detail)
-        if row:
-            rows.append(row)
-            participants.extend(match_participants)
 
-    merged_ids = ids + [match_id for match_id in known_ids if match_id not in ids]
-    fetched_at = datetime.now(timezone.utc).isoformat()
-    if rows:
-        with NamedTemporaryFile("w", encoding="utf-8", suffix=".json", delete=False, dir=db_path.parent) as handle:
-            json.dump({"source": "riot_api_new_matches", "matches": rows}, handle, ensure_ascii=False)
-            temp_path = Path(handle.name)
-        try:
-            result = ingest(temp_path, db_path)
-        finally:
-            temp_path.unlink(missing_ok=True)
-    else:
-        result = {"inserted": 0, "skipped": 0}
+def _stored_puuids(db_path: Path, account: str) -> tuple[str, ...]:
+    """Resolve one saved owner for an unavailable configured Riot ID.
 
+    A current registry name wins over historical aliases.  This keeps an old
+    configured Riot ID usable after a rename, while a Riot ID later assigned
+    to another registered owner no longer falls back to its previous owner.
+    """
+    resolved_path = Path(db_path).resolve(strict=True)
+    connection = sqlite3.connect(f"{resolved_path.as_uri()}?mode=ro", uri=True)
+    try:
+        current = tuple(
+            str(row[0])
+            for row in connection.execute(
+                "SELECT DISTINCT p.puuid FROM riot_identity_puuids p "
+                "JOIN riot_account_identities i ON i.identity_id=p.identity_id "
+                "WHERE i.account=? ORDER BY p.puuid",
+                (account,),
+            )
+            if row[0]
+        )
+        if current:
+            return current
+        exact = tuple(
+            str(row[0])
+            for row in connection.execute(
+                "SELECT DISTINCT puuid FROM riot_match_list_raw WHERE account=? ORDER BY puuid",
+                (account,),
+            )
+            if row[0]
+        )
+        if exact:
+            return exact
+        normalized = normalize_riot_id(account)
+        if not normalized:
+            return ()
+        aliases = list(connection.execute(
+            "SELECT DISTINCT a.puuid,p.identity_id FROM riot_account_aliases a "
+            "JOIN riot_identity_puuids p ON p.puuid=a.puuid "
+            "WHERE a.normalized_riot_id=? ORDER BY a.puuid",
+            (normalized,),
+        ))
+        owners = {str(row[1]) for row in aliases}
+        if len(owners) != 1:
+            return ()
+        return tuple(str(row[0]) for row in aliases if row[0])
+    finally:
+        connection.close()
+
+
+def _normalize(
+    account: str,
+    puuid: str,
+    detail: dict,
+    evidence: AccountIdentityEvidence | None = None,
+) -> tuple[dict | None, list[dict]]:
+    """Compatibility wrapper around the shared exact identity resolver."""
+    evidence = evidence or AccountIdentityEvidence(
+        account,
+        frozenset({str(puuid).strip()}),
+        frozenset({normalize_riot_id(account)} - {""}),
+    )
+    result = normalize_match_detail(account, evidence, detail)
+    return result.row, list(result.participants) if result.row else []
+
+
+def check_account(account: str, key: str, db_path: Path) -> dict:
+    initialize_ingestion_database(db_path)
     storage = SQLiteStorage(db_path, SCHEMA_PATH)
+    game_name, tag_line = riot_id(account)
+    account_path = (
+        f"/riot/account/v1/accounts/by-riot-id/"
+        f"{quote(game_name, safe='')}/{quote(tag_line, safe='')}"
+    )
+    try:
+        identity = _riot_get_limited(account_path, key)
+    except RiotAPIError as error:
+        if error.status_code != 404 or not error.path.startswith("/riot/account/v1/"):
+            raise
+        saved_puuids = _stored_puuids(db_path, account)
+        if len(saved_puuids) != 1:
+            raise
+        stored_puuid = saved_puuids[0]
+        identity = _riot_get_limited(
+            f"/riot/account/v1/accounts/by-puuid/{quote(stored_puuid, safe='')}", key,
+        )
+        if isinstance(identity, Mapping) and str(identity.get("puuid", "")) != stored_puuid:
+            raise AccountIdentityConflict(
+                f"Account-V1 by PUUID ha restituito un proprietario diverso per {account!r}"
+            )
+    if not isinstance(identity, Mapping):
+        raise RuntimeError(f"Risposta Account-V1 inattesa per {account}")
+    puuid = str(identity["puuid"])
     connection = storage.connect()
     try:
-        storage.initialize()
-        migrate_match_participant_champions(connection)
+        known_api_ids = _known_match_ids_for_puuid(connection, puuid)
+        retry_ids, refetch_ids = _retry_detail_ids(
+            connection, known_api_ids, account, puuid,
+        )
+    finally:
+        connection.close()
+    ids = _fetch_match_ids_until_overlap(puuid, key, known_api_ids)
+    downloaded = {}
+    pending_details = []
+    refetch_set = set(refetch_ids)
+    connection = storage.connect()
+    try:
+        # Raw details are global by match ID, including when an account renamed.
+        for match_id in dedupe_match_ids([*ids, *refetch_ids]):
+            raw = connection.execute("SELECT payload_json FROM riot_match_raw WHERE match_id=?", (match_id,)).fetchone()
+            try:
+                cached = json.loads(raw["payload_json"]) if raw else None
+            except (TypeError, ValueError):
+                cached = None
+            if isinstance(cached, dict) and cached.get("info") and match_id not in refetch_set:
+                continue
+            detail_path = f"/lol/match/v5/matches/{quote(match_id, safe='')}"
+            try:
+                detail = _riot_get_limited(detail_path, key)
+            except RiotAPIError as error:
+                if error.status_code == 404 and error.path == detail_path:
+                    pending_details.append(match_id)
+                    continue
+                raise
+            if not isinstance(detail, Mapping):
+                pending_details.append(match_id)
+                continue
+            downloaded[match_id] = dict(detail)
+    finally:
+        connection.close()
+    connection = storage.connect()
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        canonical = f"{identity.get('gameName', '')}#{identity.get('tagLine', '')}"
+        account = reconcile_account_identity(
+            connection, account, puuid, canonical if normalize_riot_id(canonical) else account,
+        )
+        known_ids, _known_details = account_raw_matches(connection, account)
+        merged_ids = dedupe_match_ids([*ids, *known_ids])
+        fetched_at = datetime.now(timezone.utc).isoformat()
         connection.execute(
             "INSERT INTO riot_accounts_raw(puuid,account,game_name,tag_line,fetched_at,payload_json) VALUES(?,?,?,?,?,?) "
             "ON CONFLICT(puuid) DO UPDATE SET account=excluded.account,game_name=excluded.game_name,tag_line=excluded.tag_line,fetched_at=excluded.fetched_at,payload_json=excluded.payload_json",
@@ -121,25 +341,27 @@ def check_account(account: str, key: str, db_path: Path) -> dict:
         connection.executemany(
             "INSERT INTO riot_match_raw(match_id,routing_region,fetched_at,payload_json) VALUES(?,?,?,?) "
             "ON CONFLICT(match_id) DO UPDATE SET routing_region=excluded.routing_region,fetched_at=excluded.fetched_at,payload_json=excluded.payload_json",
-            [(match_id, MATCH_ROUTING, fetched_at, json.dumps(payload, ensure_ascii=False)) for match_id, payload in raw_matches.items()],
+            [(match_id, MATCH_ROUTING, fetched_at, json.dumps(payload, ensure_ascii=False)) for match_id, payload in downloaded.items()],
         )
         connection.execute("INSERT INTO tracked_account_puuids(puuid,account) VALUES(?,?) ON CONFLICT(puuid) DO UPDATE SET account=excluded.account", (puuid, account))
-        connection.executemany(
-            """INSERT INTO match_participants(match_id,puuid,riot_id,team_id,win,champion)
-               VALUES(?,?,?,?,?,?)
-               ON CONFLICT(match_id,puuid) DO UPDATE SET
-                 riot_id=excluded.riot_id,
-                 team_id=excluded.team_id,
-                 win=excluded.win,
-                 champion=CASE WHEN excluded.champion <> '' THEN excluded.champion
-                               ELSE match_participants.champion END""",
-            [(p["match_id"], p["puuid"], p["riot_id"], p["team_id"], int(p["win"]), p.get("champion", ""))
-             for p in participants if p["puuid"]],
+        record_verified_account_identity(connection, account, puuid, identity, fetched_at)
+        _all_ids, details = account_raw_matches(connection, account)
+        result = persist_account_materialization(
+            connection, account, identity_evidence(connection, account, puuid, identity),
+            details, "riot_api_new_matches", participant_writer=upsert_match_participants,
         )
         connection.commit()
+    except BaseException:
+        connection.rollback()
+        raise
     finally:
         connection.close()
-    return {"account": account, "recent_ids": len(ids), "new_ids": len(new_ids), "inserted": int(result["inserted"]), "skipped": int(result["skipped"])}
+    return result | {
+        "account": account, "recent_ids": len(ids),
+        "new_ids": len(set(ids) - set(known_ids)),
+        "retried_raw": len(retry_ids),
+        "pending_details": len(pending_details),
+    }
 
 
 def main() -> None:
@@ -153,23 +375,47 @@ def main() -> None:
         raise SystemExit("RIOT_API_KEYS mancante")
     accounts = tuple(args.account) if args.account else TRACKED_ACCOUNTS
     if not accounts:
-        raise SystemExit("Nessun account configurato: imposta RIOT_ACCOUNTS o passa --account")
-    assignments = [(account, keys[index % len(keys)]) for index, account in enumerate(accounts)]
-    results, unresolved = [], []
-    with ThreadPoolExecutor(max_workers=min(len(keys), len(assignments))) as executor:
-        futures = {executor.submit(check_account, account, key, args.db): account for account, key in assignments}
-        for future in as_completed(futures):
-            account = futures[future]
-            try:
-                result = future.result()
-                results.append(result)
-                print(json.dumps(result, ensure_ascii=False), flush=True)
-            except RuntimeError as error:
-                if "HTTP 404" in str(error):
-                    unresolved.append(account)
-                else:
-                    raise
-    print(json.dumps({"accounts": len(accounts), "checked": len(results), "unresolved": sorted(unresolved), "new_ids": sum(r["new_ids"] for r in results), "inserted": sum(r["inserted"] for r in results)}, ensure_ascii=False), flush=True)
+        accounts = _stored_accounts(args.db)
+    if not accounts:
+        raise SystemExit("Nessun account configurato o salvato: imposta RIOT_ACCOUNTS o passa --account")
+    marker = SyncActivityMarker(args.db, len(accounts))
+    marker.start()
+    try:
+        assignments = [(account, keys[index % len(keys)]) for index, account in enumerate(accounts)]
+        results, unresolved, identity_conflicts = [], [], []
+        with ThreadPoolExecutor(max_workers=min(len(keys), len(assignments))) as executor:
+            futures = {executor.submit(check_account, account, key, args.db): account for account, key in assignments}
+            for future in as_completed(futures):
+                account = futures[future]
+                try:
+                    result = future.result()
+                    results.append(result)
+                    print(json.dumps(result, ensure_ascii=True), flush=True)
+                except AccountIdentityConflict as error:
+                    identity_conflicts.append(account)
+                    print(json.dumps({
+                        "identity_conflict": account,
+                        "reason": str(error),
+                    }, ensure_ascii=True), flush=True)
+                except RiotAPIError as error:
+                    if error.status_code == 404 and error.path.startswith("/riot/account/v1/"):
+                        unresolved.append(account)
+                    else:
+                        raise
+        print(json.dumps({
+            "accounts": len(accounts),
+            "checked": len(results),
+            "unresolved": sorted(unresolved),
+            "identity_conflicts": sorted(identity_conflicts),
+            "new_ids": sum(r["new_ids"] for r in results),
+            "retried_raw": sum(r["retried_raw"] for r in results),
+            "pending_details": sum(r["pending_details"] for r in results),
+            "inserted": sum(r["inserted"] for r in results),
+            "removed_stale": sum(r["removed_stale"] for r in results),
+            "identity_edges_persisted": sum(r["identity_edges_persisted"] for r in results),
+        }, ensure_ascii=True), flush=True)
+    finally:
+        marker.close()
 
 
 if __name__ == "__main__":

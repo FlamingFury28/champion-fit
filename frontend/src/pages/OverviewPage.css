@@ -1,0 +1,26 @@
+.overview-page .answer-caveat p { font-size: 13px; line-height: 1.6; }
+
+.overview-destinations {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.overview-destinations .surface {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+
+.overview-destinations h2,
+.overview-destinations p {
+  margin: 0;
+}
+
+.overview-destinations .text-link {
+  margin-top: 8px;
+}
+
+@media (max-width: 900px) {
+  .overview-destinations { grid-template-columns: 1fr; }
+}

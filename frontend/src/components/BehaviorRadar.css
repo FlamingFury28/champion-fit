@@ -1,0 +1,23 @@
+.behavior-views { min-width: 0; margin-top: 22px; }
+.behavior-radar { margin: 22px 0 16px; min-width: 0; padding: 20px; border: 1px solid var(--border); background: var(--surface-soft); border-radius: 6px; }
+.behavior-radar figcaption h3 { margin: 0 0 8px; font-size: 24px; }
+.behavior-radar figcaption p { color: var(--text-soft); font-size: 12px; line-height: 1.75; }
+.behavior-radar__legend { display: flex; flex-wrap: wrap; gap: 10px 24px; padding: 10px 0; font-size: 12px; }
+.behavior-radar__legend > span { display: inline-flex; align-items: center; gap: 9px; }
+.behavior-radar__key { display: inline-block; width: 26px; border-top: 3px solid var(--positive); }
+.behavior-radar__key[data-outcome="losses"] { border-color: var(--negative); border-top-style: dashed; }
+.behavior-radar__chart { display: block; width: 100%; max-width: 650px; height: auto; margin: 4px auto 0; overflow: visible; }
+.behavior-radar__grid { fill: none; stroke: var(--border-strong); stroke-width: 1; }
+.behavior-radar__axis { stroke: var(--border); stroke-width: 1; }
+.behavior-radar__label { fill: var(--text); font: 600 13px var(--font-sans); }
+.behavior-radar__tick { fill: var(--text-soft); font: 11px var(--font-mono); }
+.behavior-radar__series { color: var(--positive); }
+.behavior-radar__series[data-outcome="losses"] { color: var(--negative); }
+.behavior-radar__series polygon { fill: currentColor; fill-opacity: .1; stroke: currentColor; stroke-width: 2.5; stroke-linejoin: round; }
+.behavior-radar__series[data-outcome="losses"] polygon { fill-opacity: .04; stroke-dasharray: 6 4; }
+.behavior-radar__series circle, .behavior-radar__series rect { fill: currentColor; stroke: var(--surface); stroke-width: 1.5; }
+@media (max-width: 700px) {
+  .behavior-radar { padding: 14px 10px; }
+  .behavior-radar figcaption h3 { font-size: 21px; }
+  .behavior-radar__legend { font-size: 11px; }
+}

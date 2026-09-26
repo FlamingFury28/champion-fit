@@ -1,3 +1,8 @@
+x-app-image: &app-image
+  image: champion-fit:local
+  build:
+    context: .
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -7,6 +12,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD before starting}
     volumes:
       - champion_fit_pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U champion_fit -d champion_fit"]
       interval: 2s
@@ -14,23 +20,33 @@ services:
       retries: 20
 
   migrate:
-    build: .
-    command: sh -c 'python migrate_postgres.py "postgresql://champion_fit:$${POSTGRES_PASSWORD}@postgres:5432/champion_fit"'
+    <<: *app-image
+    profiles: ["bootstrap"]
+    command: python migrate_postgres.py --sqlite /data/champion_fit.db postgresql://champion_fit@postgres:5432/champion_fit
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD before starting}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD before starting}
+    volumes:
+      - type: bind
+        source: ${CHAMPION_FIT_SQLITE_PATH:-./champion_fit.db}
+        target: /data/champion_fit.db
+        read_only: true
     depends_on:
       postgres:
         condition: service_healthy
+    restart: "on-failure:5"
 
   web:
-    build: .
+    <<: *app-image
     environment:
-      CHAMPION_FIT_DATABASE_URL: postgresql://champion_fit:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD before starting}@postgres:5432/champion_fit
+      CHAMPION_FIT_DATABASE_URL: postgresql://champion_fit@postgres:5432/champion_fit
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD before starting}
     ports:
-      - "8787:8787"
+      - "${CHAMPION_FIT_BIND_ADDRESS:-127.0.0.1}:8787:8787"
     depends_on:
-      migrate:
-        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   champion_fit_pgdata:

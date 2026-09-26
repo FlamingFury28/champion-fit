@@ -1,0 +1,12 @@
+.matches-page { min-width: 0; }
+.matches-page [id^="match-"] { scroll-margin-top: 150px; }
+.matches-page .page-header:has(h2) { min-height: 0; }
+.matches-page .page-header h2 { font-size: 28px; }
+.matches-performance { display: grid; gap: 24px; }
+.matches-roles { padding: 24px; }
+.matches-role-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+.matches-role-grid article { display: grid; gap: 7px; padding: 16px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface-soft); }
+.matches-role-grid strong { font-size: 16px; }
+.matches-role-grid span { color: var(--text-soft); font-size: 12px; }
+.matches-role-grid b { font-size: 13px; font-weight: 600; }
+@media (max-width: 700px) { .matches-roles { padding: 17px; } }

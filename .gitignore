@@ -14,6 +14,7 @@ htmlcov/
 *.sqlite3
 data/
 outputs/
+/.backups/
 
 # Local configuration and secrets
 .env
