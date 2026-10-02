@@ -97,10 +97,8 @@ function TacticalField() {
 }
 
 const workflow = [
-  { index: '01', label: 'Gioca', title: 'Chi mi conviene giocare?', copy: 'Una raccomandazione prudente e la matrice completa dell’evidenza.', to: '/app/fit' },
-  { index: '02', label: 'Allena', title: 'Chi dovrei allenare per capire se fa per me?', copy: 'Il piano generale filtrato sui tuoi dati e le partite da distribuire.', to: '/app/test-plan' },
-  { index: '03', label: 'Banna', title: 'Chi dovrei bannare?', copy: 'Gli avversari che penalizzano davvero il tuo rendimento sui dati selezionati.', to: '/app/champions' },
-  { index: '04', label: 'Lascia', title: 'Chi non dovrei più giocare?', copy: 'Campioni da mettere in pausa e segnali che meritano ancora una verifica.', to: '/app/review/blacklist' },
+  { index: '01', label: 'Confronta', title: 'Quali giochi meglio?', copy: 'Confronta il rendimento storico per campione, ruolo, modalità e periodo.', to: '/app/fit?section=best' },
+  { index: '02', label: 'Pianifica', title: 'Piano da 400 partite', copy: 'Distribuisci le prossime partite tra i candidati per ridurre l’incertezza della scelta.', to: '/app/fit?section=tournament' },
 ]
 
 function ProductPreview() {
@@ -156,7 +154,7 @@ function ProductPreview() {
 
   return (
     <div ref={sceneRef} className="landing-preview-scene">
-      <div className="landing-preview landing-preview--interactive" role="img" aria-label="Anteprima dimostrativa delle risposte con dati di esempio: tre scelte da giocare, quattrocento partite distribuite e quattro campioni esclusi. Nessun dato personale.">
+      <div className="landing-preview landing-preview--interactive" role="img" aria-label="Anteprima dimostrativa con dati di esempio: confronto del rendimento storico e piano da quattrocento partite. Nessun dato personale.">
         <div className="landing-preview__rail" aria-hidden="true">
           <BrandMark className="landing-preview__logo" />
           {Array.from({ length: 6 }).map((_, index) => <i key={index} />)}
@@ -167,9 +165,8 @@ function ProductPreview() {
             <span className="preview-scope">3 ACCOUNT ATTIVI</span>
           </header>
           <div className="preview-metrics">
-            <article><small>CHI GIOCARE</small><strong>3 scelte</strong><span>stima prudente</span></article>
-            <article><small>CHI ALLENARE</small><strong>400</strong><span>partite distribuite</span></article>
-            <article><small>CHI LASCIARE</small><strong>4 esclusi</strong><span>nel ciclo corrente</span></article>
+            <article><small>RENDIMENTO STORICO</small><strong>3 campioni</strong><span>segnali da confrontare</span></article>
+            <article><small>PIANO COMPETITIVO</small><strong>400</strong><span>partite da distribuire</span></article>
           </div>
           <div className="preview-lower">
             <section>
@@ -183,9 +180,9 @@ function ProductPreview() {
               ))}
             </section>
             <section className="preview-decision">
-              <span>CHI BANNARE</span>
-              <strong>Il rischio emerge dalle tue partite.</strong>
-              <p>La risposta considera sia i tuoi campioni nel complesso, sia ciascuno di loro.</p>
+              <span>LETTURA DEL RISULTATO</span>
+              <strong>Il segnale resta esplorativo.</strong>
+              <p>Il confronto descrive i dati osservati e rende visibile l’incertezza.</p>
             </section>
           </div>
         </div>
@@ -218,7 +215,7 @@ export function LandingPage() {
             <p className="eyebrow"><Sparkles aria-hidden="true" /> una domanda alla volta</p>
             <h1 id="landing-title">Hai una domanda sui tuoi campioni? <em className="landing-kinetic-answer">Qui trovi la risposta.</em></h1>
             <p className="landing-lede">
-              Chi giocare, chi allenare, chi bannare e chi lasciare: ogni risposta dichiara quali dati usa e quanto è solido il segnale.
+              Confronta quali campioni hanno reso meglio nei dati osservati e distribuisci un piano da 400 partite per chiarire la scelta.
             </p>
             <div className="landing-actions">
               <Link className="button button--large" to="/app/overview">Vai alle tue risposte <ArrowRight aria-hidden="true" /></Link>
@@ -258,7 +255,7 @@ export function LandingPage() {
 
         <section className="landing-workflow" id="workflow" aria-labelledby="landing-workflow-title">
           <header>
-            <p className="eyebrow">Quattro domande, quattro risposte</p>
+            <p className="eyebrow">Due domande competitive</p>
             <h2 id="landing-workflow-title">Parti da ciò che vuoi sapere.</h2>
           </header>
           <div className="workflow-grid">
@@ -279,7 +276,7 @@ export function LandingPage() {
           <ScanSearch aria-hidden="true" />
           <p className="eyebrow">Il valore</p>
           <h2 id="landing-value-title">Prima la risposta.<br />Subito dopo, il perché.</h2>
-          <p>Ogni risposta spiega perché una scelta è solida, provvisoria o ancora da verificare.</p>
+          <p>Ogni risposta mostra il contesto osservato e l’incertezza del confronto.</p>
           <Link className="button button--large" to="/app/overview">Apri le tue risposte <ArrowRight aria-hidden="true" /></Link>
         </section>
       </main>

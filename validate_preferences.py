@@ -25,7 +25,7 @@ from typing import Any
 from champion_taxonomy import canonical_champion, champion_entry
 
 
-PROTOCOL_VERSION = "observed-preference-next-choice-v1"
+PROTOCOL_VERSION = "observed-preference-next-choice-v2"
 PREFIXES = (3, 5, 10, 20)
 TOP_K = 3
 SUPPORTED_QUEUES = frozenset({"400", "420", "430", "440", "480", "490", "700"})
@@ -308,6 +308,7 @@ def _jaccard(left: Sequence[str], right: Sequence[str]) -> float | None:
 def _call_builder(
     builder: Callable[..., Mapping[str, Any]],
     rows: Sequence[dict[str, object]],
+    lifetime_rows: Sequence[dict[str, object]],
     account: str,
     role: str,
     *,
@@ -325,7 +326,7 @@ def _call_builder(
     performance_disabled = "include_performance" in inspect.signature(builder).parameters
     if performance_disabled:
         kwargs["include_performance"] = False
-    result = builder(rows, rows, [account], role, **kwargs)
+    result = builder(rows, lifetime_rows, [account], role, **kwargs)
     if not isinstance(result, Mapping):
         raise ValueError("build_recommendations must return a mapping")
     return result, performance_disabled
@@ -349,6 +350,11 @@ def replay_preferences(
     eligible_by_prefix = Counter()
     performance_disabled_calls = 0
     groups = group_strata(observations)
+    by_identity: dict[str, list[Observation]] = defaultdict(list)
+    for item in observations:
+        by_identity[item.identity_group].append(item)
+    for rows in by_identity.values():
+        rows.sort(key=lambda item: (item.occurred_at, item.match_id, item.role, item.queue))
     for (identity_group, role, queue), group in sorted(groups.items()):
         previous_known: list[str] | None = None
         previous_discover: list[str] | None = None
@@ -360,15 +366,26 @@ def replay_preferences(
             if target.occurred_at <= train[-1].occurred_at:
                 skipped_same_timestamp += 1
                 continue
-            familiar = target.champion in {item.champion for item in train}
-            if champion_entry(target.champion) is None and not familiar:
+            cutoff = train[-1].occurred_at
+            lifetime_train = [
+                item for item in by_identity[identity_group]
+                if item.occurred_at <= cutoff
+            ]
+            context_champions = {item.champion for item in train}
+            lifetime_champions = {item.champion for item in lifetime_train}
+            familiar = target.champion in context_champions
+            tried_other_context = not familiar and target.champion in lifetime_champions
+            genuinely_novel = target.champion not in lifetime_champions
+            if champion_entry(target.champion) is None and genuinely_novel:
                 skipped_unknown_target += 1
                 continue
             eligible_by_prefix[prefix] += 1
             engine_rows = [item.engine_row() for item in train]
+            lifetime_engine_rows = [item.engine_row() for item in lifetime_train]
             result, performance_disabled = _call_builder(
                 builder,
                 engine_rows,
+                lifetime_engine_rows,
                 train[0].account,
                 role,
                 limit=limit,
@@ -411,17 +428,26 @@ def replay_preferences(
                 "identity_group": identity_group,
                 "stratum": (identity_group, role, queue),
                 "prefix": prefix,
+                "target_match_id": target.match_id,
+                "target_time": target.occurred_at.isoformat(),
+                "target_patch": target.patch,
                 "familiar_target": familiar,
+                "familiar_in_context": familiar,
+                "tried_other_context": tried_other_context,
+                "genuinely_novel": genuinely_novel,
                 "known_hit_1": familiar and target.champion in known[:1],
                 "known_hit_3": familiar and target.champion in known[:TOP_K],
-                "discover_hit_3": (not familiar) and target.champion in discover[:TOP_K],
+                "discover_hit_3": genuinely_novel and target.champion in discover[:TOP_K],
                 "engine_any_hit_3": (
                     target.champion in known[:TOP_K] if familiar
-                    else target.champion in discover[:TOP_K]
+                    else target.champion in discover[:TOP_K] if genuinely_novel
+                    else False
                 ),
                 "frequency_hit_3": target.champion in frequency_top,
                 "last_choice_hit_1": target.champion == last_champion,
                 "missing_from_full_output": target.champion not in full_union,
+                "distinct_context_champions": len(context_champions),
+                "known_hit_3_mechanical": familiar and len(context_champions) <= TOP_K,
                 "known_stability_jaccard": _jaccard(previous_known, known[:TOP_K]) if previous_known is not None else None,
                 "discover_stability_jaccard": _jaccard(previous_discover, discover[:TOP_K]) if previous_discover is not None else None,
                 "combined_stability_jaccard": _jaccard(previous_combined, combined_signature) if previous_combined is not None else None,
@@ -433,6 +459,14 @@ def replay_preferences(
             previous_known = known[:TOP_K]
             previous_discover = discover[:TOP_K]
             previous_combined = combined_signature
+    target_match_counts = Counter(str(event["target_match_id"]) for event in events)
+    events_per_account = Counter(str(event["identity_group"]) for event in events)
+    target_matches_by_prefix: dict[str, int] = {}
+    for prefix in sorted(set(prefixes)):
+        target_matches_by_prefix[str(prefix)] = len({
+            str(event["target_match_id"])
+            for event in events if event["prefix"] == prefix
+        })
     return events, {
         "total_strata": len(groups),
         "eligible_strata_by_prefix": {
@@ -442,6 +476,14 @@ def replay_preferences(
         "skipped_unseen_catalog_unknown_targets": skipped_unknown_target,
         "contract_errors": dict(sorted(contract_errors.items())),
         "performance_disabled_calls": performance_disabled_calls,
+        "unique_target_matches": len(target_match_counts),
+        "unique_target_matches_by_prefix": target_matches_by_prefix,
+        "shared_target_matches": sum(count > 1 for count in target_match_counts.values()),
+        "events_on_shared_target_matches": sum(
+            count for count in target_match_counts.values() if count > 1
+        ),
+        "maximum_target_match_multiplicity": max(target_match_counts.values(), default=0),
+        "events_per_account": dict(sorted(events_per_account.items())),
     }
 
 
@@ -476,8 +518,20 @@ def _mean(events: Sequence[Mapping[str, Any]], field: str) -> dict[str, Any]:
 
 
 def summarize_events(events: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    familiar = [event for event in events if event["familiar_target"]]
-    unseen = [event for event in events if not event["familiar_target"]]
+    familiar = [
+        event for event in events
+        if bool(event.get("familiar_in_context", event["familiar_target"]))
+    ]
+    tried_other_context = [
+        event for event in events if bool(event.get("tried_other_context", False))
+    ]
+    genuinely_novel = [
+        event for event in events
+        if bool(event.get(
+            "genuinely_novel",
+            not event["familiar_target"] and not event.get("tried_other_context", False),
+        ))
+    ]
     per_account: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
     for event in events:
         per_account[str(event["identity_group"])].append(event)
@@ -496,14 +550,27 @@ def summarize_events(events: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         bool(event["frequency_hit_3"]) and not bool(event["known_hit_3"])
         for event in familiar
     )
+    discovery_coverage = _rate(genuinely_novel, "discover_hit_3")
     return {
         "next_choice_events": len(events),
         "accounts": len(per_account),
         "strata": len({tuple(event["stratum"]) for event in events}),
         "observed_reuse": _rate(events, "familiar_target"),
+        "target_categories": {
+            "familiar_in_context": len(familiar),
+            "tried_other_context": len(tried_other_context),
+            "genuinely_novel": len(genuinely_novel),
+            "tried_other_context_missing_from_output": _rate(
+                tried_other_context, "missing_from_full_output"
+            ),
+        },
         "known": {
             "hit_at_1_familiar": _rate(events, "known_hit_1", subset="familiar_target"),
             "hit_at_3_familiar": _rate(events, "known_hit_3", subset="familiar_target"),
+            "mechanically_covered_at_3": _rate(
+                [event for event in familiar if "known_hit_3_mechanical" in event],
+                "known_hit_3_mechanical",
+            ),
             "equal_account_hit_at_3": {
                 "accounts": len(equal_account_known_rates),
                 "mean": round(sum(equal_account_known_rates) / len(equal_account_known_rates), 10)
@@ -511,7 +578,8 @@ def summarize_events(events: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             },
         },
         "discover": {
-            "coverage_at_3_unseen": _rate(unseen, "discover_hit_3"),
+            "coverage_at_3_genuinely_novel": discovery_coverage,
+            "coverage_at_3_unseen": discovery_coverage,
         },
         "next_choice": {
             "engine_any_hit_at_3": _rate(events, "engine_any_hit_3"),
@@ -580,7 +648,10 @@ def build_report(
             "trial_budget": trial_budget,
             "sampling": "all eligible account x role x queue strata; no arbitrary account cap",
             "target": "the immediately following strictly later match in the same stratum",
-            "history": "rows and lifetime_rows both stop at the prefix; feedback is None",
+            "history": (
+                "rows stop at the account-role-queue prefix; lifetime_rows contain all "
+                "observations for that account at or before the prefix cutoff; feedback is None"
+            ),
             "selection": "most-played frequency, recent observations and profiles use training rows only",
             "baselines": ["raw training frequency top-3", "immediately previous champion"],
             "performance_used_for_validation": False,
@@ -606,7 +677,10 @@ def build_report(
             "Champion choice is observational and depends on ownership, bans, autofill, patch, teammates, opponents and player intent.",
             "The next observed choice is a reuse proxy, not a satisfaction or preference label.",
             "Each prefix contributes at most one next match per account-role-queue stratum; Wilson intervals ignore session dependence.",
+            "Wilson intervals are event-level diagnostics and do not adjust for repeated accounts or target matches shared across accounts.",
+            "At prefix 3, familiar hit@3 is mechanical whenever the context contains at most three distinct champions.",
             "Discovery coverage only evaluates an unseen champion when the player later selected it; it does not evaluate unchosen alternatives.",
+            "A champion tried previously in another role or queue is neither context-familiar nor genuinely novel and is reported separately.",
             "Current feedback is withheld because applying it to earlier prefixes would leak future information.",
             "The replay does not tune recommendation weights and cannot certify causal or universal superiority over simple baselines.",
         ],

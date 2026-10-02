@@ -25,8 +25,9 @@ describe('navigazione campioni', () => {
     const primary = screen.getByRole('navigation', { name: 'Sezioni campioni' })
     expect(within(primary).getByRole('link', { name: 'Quali giochi meglio?' })).toHaveAttribute('aria-current', 'page')
     expect(within(primary).getByRole('link', { name: 'Piano da 400 partite' })).toBeVisible()
+    expect(within(primary).queryByRole('link', { name: 'Avversari e alleati' })).not.toBeInTheDocument()
     expect(within(primary).queryByRole('link', { name: 'Familiari e preferiti' })).not.toBeInTheDocument()
-    expect(screen.getByText('Preferenze e scoperte')).toBeVisible()
+    expect(screen.getByText('Altri strumenti')).toBeVisible()
   })
 
   it('mantiene accessibili le pagine preferenze e apre il gruppo sui vecchi link', () => {
@@ -34,6 +35,6 @@ describe('navigazione campioni', () => {
     const secondary = screen.getByRole('navigation', { name: 'Preferenze e scoperte facoltative' })
     expect(screen.getByRole('heading', { name: 'Familiari e preferiti' })).toBeVisible()
     expect(within(secondary).getByRole('link', { name: 'Familiari e preferiti' })).toHaveAttribute('aria-current', 'page')
-    expect(screen.getByText('Preferenze e scoperte').closest('details')).toHaveAttribute('open')
+    expect(screen.getByText('Altri strumenti').closest('details')).toHaveAttribute('open')
   })
 })

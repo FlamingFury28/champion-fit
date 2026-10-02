@@ -26,7 +26,7 @@ const sections: MapSection[] = [
     description: 'Orientati e scegli quali dati usare.',
     icon: Compass,
     items: [
-      { title: 'Riepilogo', description: 'Proposte e segnali recenti dai tuoi dati.', to: destinations.overview, keywords: 'inizio panoramica suggerimenti risposte' },
+      { title: 'Riepilogo', description: 'Apri rendimento storico e piano competitivo.', to: destinations.overview, keywords: 'inizio panoramica rendimento piano risposte' },
       { title: 'Dati usati', description: 'Scegli account, profili salvati e presenza dei compagni.', to: destinations.data, keywords: 'account profilo filtri selezione dati contesto' },
     ],
   },
@@ -38,19 +38,6 @@ const sections: MapSection[] = [
     items: [
       { title: 'Quali giochi meglio?', description: 'Confronta il rendimento storico per account, ruolo, modalità e periodo.', to: `${destinations.champions}?section=best`, keywords: 'migliore campioni performance rendimento torneo' },
       { title: 'Piano da 400 partite', description: 'Distribuisci un budget competitivo per identificare i campioni più promettenti.', to: `${destinations.champions}?section=tournament`, keywords: '400 partite budget piano competitivo rimpianto' },
-      { title: 'Avversari e ban', description: 'Confronta i matchup e individua gli avversari da bannare.', to: `${destinations.champions}?section=matchups&relation=enemies`, keywords: 'nemici avversari matchup counter ban bannare' },
-      { title: 'Campioni alleati', description: 'Esplora i confronti con i campioni della tua squadra.', to: `${destinations.champions}?section=matchups&relation=allies`, keywords: 'sinergia alleati squadra compagni champion' },
-    ],
-  },
-  {
-    id: 'preferenze',
-    title: 'Preferenze e prove (facoltative)',
-    description: 'Suggerimenti personali basati sui campioni giocati e sui gusti dichiarati.',
-    icon: Compass,
-    items: [
-      { title: 'Familiari e preferiti', description: 'Rivedi i campioni giocati e le preferenze che hai indicato.', to: `${destinations.champions}?section=choices`, keywords: 'le mie scelte giocare preferiti familiari gusti risultati pick' },
-      { title: 'Scopri candidati', description: 'Trova campioni nuovi affini alle scelte già osservate.', to: `${destinations.champions}?section=training&training=discover`, keywords: 'scoprire nuovi candidati alternative esplorare' },
-      { title: 'Piano di prove', description: 'Organizza prove brevi, una partita per candidato.', to: `${destinations.champions}?section=training&training=plan`, keywords: 'allenamento provare test piano sessioni' },
     ],
   },
   {
@@ -66,11 +53,24 @@ const sections: MapSection[] = [
   },
   {
     id: 'squadra',
-    title: 'Squadra',
-    description: 'Analizza le partite condivise con altre persone.',
+    title: 'Confronti e squadra',
+    description: 'Analisi aggiuntive su campioni avversari, alleati e persone.',
     icon: UsersRound,
     items: [
+      { title: 'Avversari e ban', description: 'Confronta i risultati osservati nei matchup.', to: `${destinations.champions}?section=matchups&relation=enemies`, keywords: 'nemici avversari matchup counter ban bannare' },
+      { title: 'Campioni alleati', description: 'Esplora i confronti con i campioni della tua squadra.', to: `${destinations.champions}?section=matchups&relation=allies`, keywords: 'sinergia alleati squadra compagni champion' },
       { title: 'Compagni di squadra', description: 'Trova chi gioca con te e raggruppa i Riot ID.', to: destinations.companions, keywords: 'amici persone riot id gruppi alleati giocatori' },
+    ],
+  },
+  {
+    id: 'preferenze',
+    title: 'Preferenze e prove (facoltative)',
+    description: 'Suggerimenti personali basati sui campioni giocati e sui gusti dichiarati.',
+    icon: Compass,
+    items: [
+      { title: 'Familiari e preferiti', description: 'Rivedi i campioni giocati e le preferenze che hai indicato.', to: `${destinations.champions}?section=choices`, keywords: 'le mie scelte giocare preferiti familiari gusti risultati pick' },
+      { title: 'Scopri candidati', description: 'Trova campioni nuovi affini alle scelte già osservate.', to: `${destinations.champions}?section=training&training=discover`, keywords: 'scoprire nuovi candidati alternative esplorare' },
+      { title: 'Piano di prove', description: 'Organizza prove brevi, una partita per candidato.', to: `${destinations.champions}?section=training&training=plan`, keywords: 'allenamento provare test piano sessioni' },
     ],
   },
   {

@@ -30,6 +30,7 @@
 .playstyles-composition, .playstyles-account-support, .playstyles-champions { padding: 0; list-style: none; }
 .playstyles-composition li, .playstyles-account-support li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 5px 12px; padding: 8px 0; border-bottom: 1px solid var(--border); }
 .playstyles-composition span, .playstyles-account-support span { color: var(--text-soft); }
+.playstyles-composition .playstyles-composition-reason { flex-basis: 100%; }
 .playstyles-sensitivity { margin: 16px 0; padding: 13px; background: var(--surface); border-left: 2px solid var(--info); }
 .playstyles-method { color: var(--text-soft); font-size: 12px; line-height: 1.8; }
 .playstyles-sources { font-size: 11px; padding-left: 18px; color: var(--text-soft); overflow-wrap: anywhere; }

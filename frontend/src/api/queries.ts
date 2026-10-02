@@ -21,6 +21,7 @@ import type {
   ExplorationResponseDto,
   TrainingPlanResponseDto,
   RecommendationsResponseDto,
+  RecommendationFeedbackResponseDto,
 } from './types'
 
 export interface FitFilters extends AnalysisContextFilters { role?: string; status: string; search: string }
@@ -66,6 +67,7 @@ export const queryKeys = {
   matchups: (scope: ScopeSnapshot, champion: string, role?: string, filters: AnalysisContextFilters = {}) => ['api', 'matchups', scopeQuery(scope), champion, role, filters] as const,
   trainingPlan: (scope: ScopeSnapshot, budget: number, role: string | undefined, filters: AnalysisContextFilters = {}) => ['api', 'training-plan', scopeQuery(scope), budget, role, filters] as const,
   recommendations: (scope: ScopeSnapshot, filters: RecommendationFilters) => ['api', 'recommendations', scopeQuery(scope), filters] as const,
+  recommendationFeedback: (scope: ScopeSnapshot) => ['api', 'recommendation-feedback', { account: scopeQuery(scope).account ?? [] }] as const,
   blacklist: (scope: ScopeSnapshot) => ['api', 'blacklist', scopeQuery(scope)] as const,
   matches: (scope: ScopeSnapshot, flag: string) => ['api', 'matches', scopeQuery(scope), flag] as const,
   annotation: (matchId: string) => ['api', 'annotations', matchId] as const,
@@ -172,6 +174,15 @@ export const recommendationsQuery = (scope: ScopeSnapshot, filters: Recommendati
     champion: filters.champion,
   }, signal),
   // Advice from another scope or context must never remain visible while this request changes.
+  retry: false,
+})
+
+export const recommendationFeedbackQuery = (scope: ScopeSnapshot) => queryOptions({
+  queryKey: queryKeys.recommendationFeedback(scope),
+  queryFn: ({ signal }) => getJson<RecommendationFeedbackResponseDto>('/api/recommendation-feedback', {
+    account: scopeQuery(scope).account,
+  }, signal),
+  // Feedback is an account-level ledger: never retain another account scope while loading.
   retry: false,
 })
 

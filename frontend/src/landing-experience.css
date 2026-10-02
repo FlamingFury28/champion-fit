@@ -76,6 +76,7 @@
 .landing-experience .landing-preview__canvas > header { align-items: flex-start; gap: 8px; }
 .landing-experience .landing-preview__canvas header strong { font-size: 22px; }
 .landing-experience .preview-scope { white-space: nowrap; padding: 6px; }
+.landing-experience .preview-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .landing-experience .preview-metrics article { padding-inline: 10px; }
 .landing-experience .preview-metrics strong { font-size: clamp(21px, 2.1vw, 29px); }
 .landing-experience .preview-lower { gap: 10px; grid-template-columns: 1.25fr .85fr; }
@@ -97,7 +98,7 @@
 .landing-experience .landing-problem { grid-template-columns: .9fr 1.1fr; gap: 70px; }
 .landing-experience .problem-grid article { padding: 24px 19px; }
 .landing-experience .landing-workflow-card { position: relative; overflow: hidden; border-color: var(--border); border-radius: 4px; background: color-mix(in srgb, var(--surface) 70%, transparent); }
-.landing-experience .workflow-grid { gap: 12px; }
+.landing-experience .workflow-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .landing-experience .landing-workflow-card::after { content: ''; position: absolute; width: 95px; height: 95px; right: -40px; top: -40px; border: 1px solid color-mix(in srgb, var(--positive) 18%, transparent); transform: rotate(45deg); pointer-events: none; transition: transform 220ms; }
 .landing-experience .landing-workflow-card:hover,
 .landing-experience .landing-workflow-card:focus-visible { border-color: var(--positive); background: color-mix(in srgb, var(--positive) 5%, var(--surface)); transform: translateY(-3px); }

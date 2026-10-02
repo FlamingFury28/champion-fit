@@ -32,9 +32,9 @@ const navGroups: NavGroup[] = [
     { label: 'Riepilogo', to: destinations.overview, icon: LayoutDashboard },
     { label: 'Campioni', to: destinations.champions, icon: Swords },
     { label: 'Le mie partite', to: destinations.matches, icon: History },
-    { label: 'Compagni', to: destinations.companions, icon: UsersRound },
   ] },
-  { label: 'Impostazioni', items: [
+  { label: 'Strumenti', items: [
+    { label: 'Compagni', to: destinations.companions, icon: UsersRound },
     { label: 'Algoritmi', to: destinations.algorithmSettings, icon: Settings2 },
   ] },
 ]

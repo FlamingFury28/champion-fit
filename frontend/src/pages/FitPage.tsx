@@ -8,6 +8,7 @@ import { preferencePeriodLabel, queueLabel, roleLabel } from '../app/labels'
 import { championHref } from '../app/navigation'
 import { useScope } from '../app/scope'
 import { ObservedRecommendationCard } from '../components/ObservedRecommendationCard'
+import { PreferenceEditor } from '../components/PreferenceEditor'
 import { EmptyState, ErrorState, FilterBar, PageHeader, QueryResults, Skeleton, StatusBadge, Surface } from '../components/ui'
 
 const recommendationRoles = ROLES.filter((role) => role !== 'ALL')
@@ -39,7 +40,8 @@ export function FitPage() {
   const result = useQuery({ ...recommendationsQuery(scope, { role: explicitRole, queue, days }), enabled: scopeReady })
   const data = result.data
   const suspendedAccounts = Array.isArray(data?.context.suspended_accounts) ? data.context.suspended_accounts.map(String) : []
-  const feedbackAccounts = data?.coverage.selected_accounts.filter((account) => !suspendedAccounts.includes(account)) ?? []
+  const unresolvedAccounts = Array.isArray(data?.context.unresolved_accounts) ? data.context.unresolved_accounts.map(String) : []
+  const feedbackAccounts = data?.coverage.selected_accounts.filter((account) => !suspendedAccounts.includes(account) && !unresolvedAccounts.includes(account)) ?? []
   const allowAllAccountsShortcut = scope.accounts.length === 0 && feedbackAccounts.length === (data?.coverage.selected_accounts.length ?? 0)
   const items = (view === 'known' ? data?.known : data?.discover)?.filter((item) => recommendationMatches(item, debouncedSearch)) ?? []
   const update = (key: string, value: string) => setParams((current) => {
@@ -52,9 +54,11 @@ export function FitPage() {
   return <div className="page-stack">
     <PageHeader level={2} eyebrow="Campioni / Le mie scelte" title={<>Gusti e <em>risultati</em></>} copy="L’ordine parte dalle scelte osservate e dalle preferenze dichiarate; i risultati sono mostrati separatamente. Le scoperte usano somiglianze di catalogo: l’affinità non è una probabilità di vittoria." aside={result.isFetching && data ? <StatusBadge tone="info">Aggiornamento</StatusBadge> : undefined} />
 
+    <PreferenceEditor scope={scope} enabled={scopeReady} />
+
     <nav className="context-navigation" aria-label="Tipo di suggerimento">
-      <button type="button" aria-current={view === 'known' ? 'page' : undefined} onClick={() => update('view', '')}>Familiari e preferiti{data ? ` · ${data.known.length}` : ''}</button>
-      <button type="button" aria-current={view === 'discover' ? 'page' : undefined} onClick={() => update('view', 'discover')}>Da scoprire{data ? ` · ${data.discover.length}` : ''}</button>
+      <button type="button" aria-current={view === 'known' ? 'page' : undefined} onClick={() => update('view', '')}>Familiari e preferiti{data ? ` · ${data.known.length} mostrate` : ''}</button>
+      <button type="button" aria-current={view === 'discover' ? 'page' : undefined} onClick={() => update('view', 'discover')}>Da scoprire{data ? ` · ${data.discover.length} mostrate` : ''}</button>
       <Link to="/app/matches?section=style">Quale stile mi conviene?</Link>
     </nav>
 

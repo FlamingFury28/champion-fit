@@ -14,20 +14,28 @@ test('@smoke overview risponde ed è navigabile da tastiera', async ({ page, bro
   expect(results.violations.filter((item) => ['critical', 'serious'].includes(item.impact ?? ''))).toEqual([])
 })
 
-test('il riepilogo presenta il contesto e quattro accessi operativi', async ({ page }) => {
+test('il riepilogo presenta le analisi competitive e gli accessi ai dati', async ({ page }) => {
   await page.goto('/app/overview')
-  await expect(page.getByRole('heading', { name: 'Rendimento storico e piano competitivo' })).toBeVisible()
-  const sections = page.getByRole('region', { name: 'Sezioni operative' })
-  const destinations = [
+  const analyses = page.getByRole('region', { name: 'Analisi competitive' })
+  const analysisDestinations = [
     ['Apri Quali giochi meglio?', '/app/fit?section=best'],
     ['Apri Piano da 400 partite', '/app/fit?section=tournament'],
-    ['Apri Controlla le partite', '/app/matches'],
-    ['Apri Riconosci con chi giochi', '/app/team/friends'],
   ] as const
-  for (const [name, route] of destinations) {
-    await expect(sections.getByRole('link', { name, exact: true })).toHaveAttribute('href', route)
+  for (const [name, route] of analysisDestinations) {
+    await expect(analyses.getByRole('link', { name, exact: true })).toHaveAttribute('href', route)
   }
-  await expect(sections.getByRole('link')).toHaveCount(4)
+  await expect(analyses.getByRole('link')).toHaveCount(2)
+
+  const dataAccess = page.getByRole('region', { name: 'Controlla i dati delle analisi' })
+  const dataDestinations = [
+    ['scegliere i dati usati', '/app/profile'],
+    ['consultare lo storico delle partite', '/app/matches'],
+    ['Compagni', '/app/team/friends'],
+  ] as const
+  for (const [name, route] of dataDestinations) {
+    await expect(dataAccess.getByRole('link', { name, exact: true })).toHaveAttribute('href', route)
+  }
+  await expect(dataAccess.getByRole('link')).toHaveCount(3)
 })
 
 test('errore preferenze resta isolato dalla navigazione principale', async ({ page }) => {
@@ -357,7 +365,7 @@ test('la prima risposta resta nel primo viewport desktop e mobile', async ({ pag
     await page.setViewportSize(viewport)
     await page.goto('/app/overview')
     await page.reload()
-    const answer = page.getByRole('heading', { name: 'Rendimento storico e piano competitivo' })
+    const answer = page.getByRole('heading', { name: 'Quali giochi meglio?' })
     await expect(answer).toBeVisible()
     const box = await answer.boundingBox()
     expect(box).not.toBeNull()
@@ -392,7 +400,7 @@ test('testo operativo e controlli principali restano leggibili al tocco', async 
 
   await page.goto('/app/overview')
   await expectTouchTarget(page.getByRole('link', { name: /^(Apri Dati usati|Dati)$/ }))
-  await expectTouchTarget(page.getByRole('link', { name: 'Apri Controlla le partite', exact: true }))
+  await expectTouchTarget(page.getByRole('link', { name: 'Apri Quali giochi meglio?', exact: true }))
   expect(await page.locator('.section-copy').first().evaluate((node) => Number.parseFloat(getComputedStyle(node).fontSize))).toBeGreaterThanOrEqual(12)
 
   await page.goto('/app/fit?section=training&training=plan')

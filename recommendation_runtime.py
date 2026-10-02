@@ -26,14 +26,18 @@ def _latest_matches_per_account(rows, maximum):
     ]
 
 
-def _candidate_for_role(payload, champion_id, rows, accounts, feedback_items, settings, role):
+def _candidate_for_role(
+    payload, champion_id, rows, lifetime_rows, accounts, feedback_items,
+    settings, role, *, family_size, meaningful_delta, family_alpha,
+):
     candidate = next((item for item in [*payload["known"], *payload["discover"]]
                       if item["champion"] == champion_id), None)
     if candidate is not None:
         return candidate
     entry = champion_entry(champion_id)
     observed = [row for row in rows if row["champion"] == champion_id]
-    if entry is None and not observed:
+    historical = [row for row in lifetime_rows if row["champion"] == champion_id]
+    if entry is None and not historical:
         return None
     votes = [item["preference"] for item in feedback_items
              if item["champion"] == champion_id and item["role"] == role]
@@ -41,14 +45,16 @@ def _candidate_for_role(payload, champion_id, rows, accounts, feedback_items, se
     return {
         "champion": champion_id, "name": entry["name"] if entry else champion_id,
         "role": role, "icon_url": f"https://ddragon.leagueoflegends.com/cdn/{load_catalog()['source_version']}/img/champion/{champion_id}.png" if entry else None,
-        "kind": "familiar" if observed else "discovery", "preference_score": None, "similarity": None,
+        "kind": "familiar" if historical else "discovery", "preference_score": None, "similarity": None,
         "games": len({row["match_id"] for row in observed}), "account_count": len({row["account"] for row in observed}),
         "selected_account_count": len(accounts), "source_champions": [],
         "reasons": ["Escluso dalle proposte per una preferenza dichiarata." if "dislike" in votes else
+                    "Già giocato nello storico selezionato, ma non nel contesto corrente." if historical else
                     "Nessuna affinità sufficiente per proporlo dal profilo attuale."],
         "feedback": "dislike" if "dislike" in votes else "like" if "like" in votes else None,
         "performance": observed_performance(rows, observed, accounts,
-            confidence=float(settings["confidence"]), family_size=max(1, len({row["champion"] for row in rows}))),
+            confidence=float(settings["confidence"]), family_size=family_size,
+            meaningful_delta=meaningful_delta, family_alpha=family_alpha),
     }
 
 
@@ -68,18 +74,55 @@ def _trial_plan(known, discover, budget):
 def recommendation_data(connection, params, *, account_filter, companion_filter):
     """Select an explicit context once, retaining lifetime history for novelty checks."""
     from preference_recommendations import build_recommendations
-    from recommendation_feedback import read_feedback
-    settings = current_settings()["recommendations"]
-    accounts = sorted(set(params.get("account", [])))
-    if not accounts:
-        accounts = [r["account"] for r in connection.execute(
-            "SELECT DISTINCT account FROM match_quality ORDER BY account")]
-    sql, values = account_filter(accounts, "m.account")
+    from account_identity import canonical_account_name
+    from recommendation_feedback import (
+        all_scoped_accounts, read_feedback, resolved_scoped_accounts,
+    )
+    configured = current_settings()
+    settings = configured["recommendations"]
+    evidence_settings = configured["evidence"]
+    meaningful_delta = float(evidence_settings["meaningful_delta"])
+    family_alpha = float(evidence_settings["family_alpha"])
+    canonical_names = {}
+
+    def canonical_account(value):
+        account = str(value or "").strip()
+        if account not in canonical_names:
+            canonical_names[account] = canonical_account_name(connection, account)
+        return canonical_names[account]
+
+    requested_accounts = params.get("account", [])
+    account_candidates = requested_accounts or all_scoped_accounts(connection)
+    accounts_by_key = {}
+    for account in account_candidates:
+        canonical = canonical_account(account)
+        if canonical:
+            accounts_by_key.setdefault(canonical.casefold(), canonical)
+    accounts = sorted(accounts_by_key.values(), key=str.casefold)
+    resolved_accounts = (
+        resolved_scoped_accounts(connection, requested_accounts)
+        if requested_accounts else accounts
+    )
+    resolved_account_keys = {account.casefold() for account in resolved_accounts}
+    unresolved_accounts = [
+        account for account in accounts
+        if account.casefold() not in resolved_account_keys
+    ]
+    raw_accounts = [str(row["account"]) for row in connection.execute(
+        "SELECT DISTINCT account FROM match_quality ORDER BY account"
+    )]
+    raw_owners = [
+        account for account in raw_accounts
+        if canonical_account(account).casefold() in resolved_account_keys
+    ]
+    sql, values = account_filter(raw_owners, "m.account")
+    if not raw_owners:
+        sql, values = " AND 1=0", []
     # One compact fact read; no raw payload, timeline or attributed outcome.
     lifetime = [dict(row) for row in connection.execute(
         "SELECT m.account,m.match_id,m.champion,m.role,m.queue,m.date,m.win,m.duration_minutes "
         "FROM match_quality m WHERE 1=1" + sql, values)]
-    suspended = {r["account"] for r in connection.execute(
+    suspended = {canonical_account(r["account"]) for r in connection.execute(
         "SELECT i.account FROM riot_account_identities i JOIN riot_identity_policy p "
         "ON p.identity_id=i.identity_id WHERE p.state='exception' UNION "
         "SELECT m.account FROM riot_match_materialization m JOIN riot_identity_policy p "
@@ -102,6 +145,8 @@ def recommendation_data(connection, params, *, account_filter, companion_filter)
         if period["unit"] == "days" and period["value"] > 0 else None
     )
     # Future facts are never allowed to inform either preferences or novelty.
+    for row in lifetime:
+        row["account"] = accounts_by_key[canonical_account(row["account"]).casefold()]
     lifetime = [r for r in lifetime if r["account"] not in suspended
                 and (parse_time(r["date"]) is None or parse_time(r["date"]) <= now)]
     for row in lifetime:
@@ -116,8 +161,6 @@ def recommendation_data(connection, params, *, account_filter, companion_filter)
         unique[key] = row
     lifetime = list(unique.values())
     eligible = [r for r in lifetime if not cutoff or (parse_time(r["date"]) is not None and parse_time(r["date"]) >= cutoff)]
-    if period["unit"] == "games" and period["value"] > 0:
-        eligible = _latest_matches_per_account(eligible, period["value"])
     companion_sql, companion_values = companion_filter(params, "m.match_id")
     if companion_sql:
         allowed = {r["match_id"] for r in connection.execute(
@@ -155,7 +198,13 @@ def recommendation_data(connection, params, *, account_filter, companion_filter)
         role = observed_role or (min(positive_roles, key=lambda r: (-positive_roles[r], r)) if positive_roles else "MIDDLE")
     if automatic_queue:
         queue = chosen[0] if chosen else "420"
-    context_rows = [r for r in matching if all_queues or r["queue"] == queue]
+    context_rows = [
+        r for r in matching
+        if (all_queues or r["queue"] == queue)
+        and (all_roles or r["role"] == role)
+    ]
+    if period["unit"] == "games" and period["value"] > 0:
+        context_rows = _latest_matches_per_account(context_rows, period["value"])
     limit = int(settings["limit"])
     candidate_id = canonical_champion(params.get("champion", [""])[0])
     trial_budget = int(settings["trial_budget"])
@@ -171,11 +220,14 @@ def recommendation_data(connection, params, *, account_filter, companion_filter)
                 limit=len(load_catalog()["champions"]), recent_games=None,
                 trial_budget=0, confidence=float(settings["confidence"]),
                 performance_family_size=performance_family_size,
+                meaningful_delta=meaningful_delta, family_alpha=family_alpha,
+                ranking_scope_rows=context_rows,
             )
         payload = build_recommendations(
             context_rows, lifetime, accounts, "ALL", feedback=feedback["items"], limit=0,
             recent_games=None, trial_budget=0, confidence=float(settings["confidence"]),
-            include_performance=False,
+            include_performance=False, meaningful_delta=meaningful_delta,
+            family_alpha=family_alpha,
         )
         known = [item for role_payload in role_payloads.values() for item in role_payload["known"]]
         discover = [item for role_payload in role_payloads.values() for item in role_payload["discover"]]
@@ -185,7 +237,8 @@ def recommendation_data(connection, params, *, account_filter, companion_filter)
             -item["games"], item["name"].casefold(), item["champion"], item["role"],
         ))
         discover.sort(key=lambda item: (
-            -item["similarity"], item["name"].casefold(), item["champion"], item["role"],
+            -item.get("priority_score", item["similarity"]), -item["similarity"],
+            item["name"].casefold(), item["champion"], item["role"],
         ))
         payload["known"] = known[:limit]
         payload["discover"] = discover[:limit]
@@ -194,13 +247,16 @@ def recommendation_data(connection, params, *, account_filter, companion_filter)
             entry = champion_entry(candidate_id)
             candidate_roles = set(entry.get("roles", [])) if entry else set()
             candidate_roles.update(row["role"] for row in context_rows if row["champion"] == candidate_id)
+            candidate_roles.update(row["role"] for row in lifetime if row["champion"] == candidate_id)
             candidate_roles.update(item["role"] for item in feedback["items"] if item["champion"] == candidate_id)
             candidates = []
             for selected_role in sorted(candidate_roles & ROLES):
                 role_rows = [row for row in context_rows if row["role"] == selected_role]
                 candidate = _candidate_for_role(
-                    role_payloads[selected_role], candidate_id, role_rows, accounts,
-                    feedback["items"], settings, selected_role,
+                    role_payloads[selected_role], candidate_id, role_rows, lifetime,
+                    accounts, feedback["items"], settings, selected_role,
+                    family_size=performance_family_size,
+                    meaningful_delta=meaningful_delta, family_alpha=family_alpha,
                 )
                 if candidate is not None:
                     candidates.append(candidate)
@@ -209,13 +265,18 @@ def recommendation_data(connection, params, *, account_filter, companion_filter)
             payload["candidate"] = None
             payload["candidates"] = candidates
     else:
-        rows = context_rows if role == "ALL" else [row for row in context_rows if row["role"] == role]
+        rows = context_rows
+        performance_family_size = max(1, len({row["champion"] for row in rows}))
         payload = build_recommendations(rows, lifetime, accounts, role, feedback=feedback["items"],
             limit=len(load_catalog()["champions"]), recent_games=None,
-            trial_budget=trial_budget, confidence=float(settings["confidence"]))
+            trial_budget=trial_budget, confidence=float(settings["confidence"]),
+            performance_family_size=performance_family_size,
+            meaningful_delta=meaningful_delta, family_alpha=family_alpha)
         if candidate_id:
             payload["candidate"] = _candidate_for_role(
-                payload, candidate_id, rows, accounts, feedback["items"], settings, role,
+                payload, candidate_id, rows, lifetime, accounts, feedback["items"],
+                settings, role, family_size=performance_family_size,
+                meaningful_delta=meaningful_delta, family_alpha=family_alpha,
             )
             if payload["candidate"] is None:
                 raise ValueError("Campione non presente nel catalogo o nello storico")
@@ -228,6 +289,7 @@ def recommendation_data(connection, params, *, account_filter, companion_filter)
         "all_roles": all_roles, "all_queues": all_queues, "context_observed": bool(chosen),
         "recent_games": period["value"] if period["unit"] == "games" else 0,
         "suspended_accounts": sorted(set(accounts) & suspended), "companion_filter_active": bool(companion_sql),
+        "unresolved_accounts": unresolved_accounts,
         "observations": len(context_rows), "unique_games": len({r["match_id"] for r in context_rows})}
     if not context_rows:
         payload["notes"].append("Nessuna partita nel contesto indicato: i filtri restano invariati. Una preferenza dichiarata può avviare il profilo.")

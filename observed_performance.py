@@ -241,6 +241,11 @@ def observed_performance(
         _mean(cell["wins"] / cell["games"] for cell in comparable_baseline_cells)
         if comparable_baseline_cells else None
     )
+    paired_candidate_rate = (
+        _mean(cell["wins"] / cell["games"] for cell in comparable_candidate_cells)
+        if comparable_candidate_cells else None
+    )
+    paired_candidate_interval = _mean_interval_alpha(comparable_candidate_cells, alpha)
     baseline_interval = _mean_interval_alpha(comparable_baseline_cells, alpha)
     paired_lift = (
         _mean(
@@ -260,10 +265,12 @@ def observed_performance(
     )
 
     supported = False
+    decision_side_alpha = _divide_alpha(family_alpha, family_size * 2)
+    candidate_decision: tuple[float | None, float | None] = (None, None)
+    baseline_decision: tuple[float | None, float | None] = (None, None)
     if comparable_accounts and not missing_accounts and not missing_baseline_accounts:
         # At most two binomial cells per selected account and candidate.  This
         # allocation controls the full family without assuming independence.
-        decision_side_alpha = _divide_alpha(family_alpha, family_size * 2)
         candidate_decision = _mean_interval_alpha(comparable_candidate_cells, decision_side_alpha)
         baseline_decision = _mean_interval_alpha(comparable_baseline_cells, decision_side_alpha)
         supported = bool(
@@ -289,6 +296,9 @@ def observed_performance(
         "interval_high": _percent(interval[1]),
         "confidence": confidence,
         "baseline_games": len(baseline_match_ids),
+        "paired_candidate_win_rate": _percent(paired_candidate_rate),
+        "paired_candidate_low": _percent(paired_candidate_interval[0]),
+        "paired_candidate_high": _percent(paired_candidate_interval[1]),
         "baseline_win_rate": _percent(baseline_rate),
         "baseline_low": _percent(baseline_interval[0]),
         "baseline_high": _percent(baseline_interval[1]),
@@ -299,5 +309,14 @@ def observed_performance(
         "per_account": per_account,
         "supported": supported,
         "direction": direction,
+        "family_size": family_size,
+        "family_alpha": family_alpha,
+        "meaningful_delta": meaningful_delta,
+        "meaningful_delta_pp": _percent(meaningful_delta),
+        "decision_side_alpha": decision_side_alpha,
+        "decision_candidate_low": _percent(candidate_decision[0]),
+        "decision_candidate_high": _percent(candidate_decision[1]),
+        "decision_baseline_low": _percent(baseline_decision[0]),
+        "decision_baseline_high": _percent(baseline_decision[1]),
         "method": "raw_outcome_clopper_pearson_equal_account_union_bound",
     }

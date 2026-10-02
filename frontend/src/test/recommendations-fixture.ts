@@ -30,8 +30,8 @@ export function discoveryRecommendation(overrides: Partial<ObservedRecommendatio
 
 export function recommendationsFixture(overrides: Partial<RecommendationsResponseDto> = {}): RecommendationsResponseDto {
   return {
-    model_version: 'observed_preferences_v1', algorithm_revision: 4, algorithm_fingerprint: 'fingerprint-4',
-    context: { accounts: ['Alpha#EUW'], role: 'MIDDLE', queue: '420', days: 'all' }, feedback_revision: 7,
+    model_version: 'observed_preferences_v2', algorithm_revision: 4, algorithm_fingerprint: 'fingerprint-4',
+    context: { accounts: ['Alpha#EUW'], role: 'MIDDLE', queue: '420', days: 'all', suspended_accounts: [], unresolved_accounts: [] }, feedback_revision: 7,
     coverage: { selected_accounts: ['Alpha#EUW'], active_accounts: ['Alpha#EUW'], missing_accounts: [], games: 1, observations: 1 },
     profile: [{ tag: 'mage', label: 'Mago', games: 1, accounts: 1, share: 1 }],
     known: [observedRecommendation()], discover: [discoveryRecommendation()],

@@ -1,5 +1,5 @@
 {
-  "version": "1.1.0",
+  "version": "1.2.0",
   "source_version": "16.13.1",
   "champion_count": 173,
   "sources": [
@@ -40,12 +40,13 @@
     }
   ],
   "source_sha256": {
-    "champion.json": "0c849c4b396ae34f0c0ae09010cbf8462fb5352b6489ea63f897e067740dc51c"
+    "champion.json": "0c849c4b396ae34f0c0ae09010cbf8462fb5352b6489ea63f897e067740dc51c",
+    "championFull.json": "d8e7670f9c390c379241406602f58448fd5fb2398665de3f563663bd54278911"
   },
   "official_ids_sha256": "5f5ef592bf6cbd49e9170c81c15443f8d639fcbf03ef421a9ba7d713141b1e84",
   "methodology": {
     "classes": "Copia dei tags di classe ufficiali Riot per lo snapshot indicato. Una classe non è un ruolo della mappa.",
-    "styles": "Otto tag non esclusivi curati dal progetto leggendo i kit e applicando i criteri delle categorie; non sono una tassonomia ufficiale Riot. Protezione degli alleati richiede strumenti protettivi o di contro-ingaggio rilevanti e ricorrenti, non uno scudo accessorio isolato o solo controllo generico da ingaggio/pick.",
+    "styles": "Otto tag non esclusivi curati dal progetto leggendo i kit ufficiali e applicando soglie esplicite di significatività. Ogni assegnazione ha una motivazione legata alle abilità; forme ed evoluzioni necessarie sono dichiarate. Le possibilità accessorie non bastano a descrivere uno stile.",
     "roles": "Ruoli compatibili curati sul funzionamento del kit, indicativi e non esaustivi. Non sono dedotti da risultati personali, win rate o frequenze del meta; un ruolo fuori elenco non rende impossibile giocare il campione.",
     "independence": "Catalogo statico: nessun match, account, risultato, prior o peso delle sconfitte partecipa alla classificazione.",
     "limitations": "Forme, armi, build e modifiche successive alla patch possono cambiare lo stile effettivo. Le assegnazioni non predicono vittorie né misurano la forza del campione."
@@ -150,7 +151,7 @@
       "id": "style:engage",
       "label": "Inizio dello scontro",
       "kind": "style",
-      "criteria": "Il kit può avviare uno scontro o forzare una cattura con controllo, ingresso rapido o un bersaglio bloccato; non basta avere una generica abilità di movimento.",
+      "criteria": "Il kit offre un'apertura significativa: accesso associato a immobilizzazione, provocazione, spostamento o isolamento del bersaglio, oppure una suprema che cattura a distanza o controlla più avversari all'arrivo. Un semplice scatto, rallentamento o controllo che richiede uno scontro già avviato non basta.",
       "roles": [
         "TOP",
         "JUNGLE",
@@ -184,7 +185,7 @@
       "id": "style:poke",
       "label": "Pressione a distanza",
       "kind": "style",
-      "criteria": "Il kit può ripetere danni a distanza prima di impegnarsi nello scontro; non basta appartenere alla classe dei tiratori.",
+      "criteria": "Il kit offre pressione offensiva significativa e ripetibile a distanza prima di uno scontro prolungato, tramite abilità, evocazioni o colpi seguiti da un rientro sicuro. Non bastano normali attacchi a distanza, un proiettile usato soprattutto per catturare o la sola suprema. Forme, armi ed evoluzioni necessarie sono dichiarate.",
       "roles": [
         "TOP",
         "JUNGLE",
@@ -201,7 +202,7 @@
       "id": "style:burst",
       "label": "Danno esplosivo",
       "kind": "style",
-      "criteria": "Una sequenza breve di abilità, attacchi potenziati o esecuzione concentra una parte rilevante della minaccia offensiva.",
+      "criteria": "Il kit concentra una parte significativa del danno in una finestra breve tramite detonazioni, colpi potenziati, raffiche o un'esecuzione centrale. Preparazione e brevi ritardi sono ammessi. Una generica somma di abilità, un'esecuzione accessoria dopo uno scambio lungo o un picco che richiede una build rara non basta.",
       "roles": [
         "TOP",
         "JUNGLE",
@@ -218,7 +219,7 @@
       "id": "style:sustained",
       "label": "Danno prolungato",
       "kind": "style",
-      "criteria": "Attacchi ripetuti, abilità frequenti o effetti persistenti sostengono il danno durante uno scambio lungo; un semplice attacco base non basta.",
+      "criteria": "Il kit mantiene un motore significativo di danno durante gli scambi lunghi: attacchi potenziati o effetti ricorrenti, abilità frequenti, danno persistente o evocazioni attaccanti. Non bastano normali attacchi, un danno nel tempo marginale o un ripristino disponibile solo dopo un'uccisione. Forme e condizioni necessarie sono dichiarate.",
       "roles": [
         "TOP",
         "JUNGLE",
@@ -235,7 +236,7 @@
       "id": "style:zone",
       "label": "Controllo dell’area",
       "kind": "style",
-      "criteria": "Terreno, trappole, evocazioni o aree persistenti del kit limitano dove gli avversari possono muoversi o sostare.",
+      "criteria": "Il kit controlla lo spazio con terreno, trappole, evocazioni o aree che mantengono una minaccia significativa e costringono a cambiare percorso o a uscire. Valgono anche zone mobili o canalizzate. Un colpo ad area istantaneo o un rallentamento applicato solo all'impatto non basta.",
       "roles": [
         "TOP",
         "JUNGLE",
@@ -252,7 +253,7 @@
       "id": "style:duel",
       "label": "Duello",
       "kind": "style",
-      "criteria": "Il kit dispone di strumenti strutturali per scambi prolungati o ripetuti contro un singolo avversario, combinando danno, mobilità, difesa o recupero.",
+      "criteria": "Il kit sostiene scambi ripetuti o prolungati sullo stesso avversario con un ciclo offensivo ripetibile e strumenti per inseguire, mantenere la distanza, difendersi o recuperare salute. Una sola finestra di danno esplosivo o un ripristino che richiede un'uccisione non basta.",
       "roles": [
         "TOP",
         "JUNGLE",
@@ -269,7 +270,7 @@
       "id": "style:sidelane",
       "label": "Pressione laterale",
       "kind": "style",
-      "criteria": "Il kit sostiene pressione in una corsia laterale tramite duello e gestione dell’ondata, minaccia alle strutture oppure possibilità di raggiungere la squadra dopo aver spinto.",
+      "criteria": "Il kit combina gestione dell'ondata con pressione sulle strutture o evocazioni, un duello o recupero di salute sostanziale, oppure ricongiungimento a lunga distanza dopo la spinta. La mobilità contribuisce quando sostiene scambi ripetuti o permette una fuga estesa attraverso il terreno. Giocare in corsia superiore o possedere un solo scatto non basta.",
       "roles": [
         "TOP",
         "JUNGLE",
@@ -296,16 +297,21 @@
         "class:fighter"
       ],
       "tags": [
-        "style:engage",
         "style:sustained",
-        "style:duel"
+        "style:duel",
+        "style:sidelane"
       ],
       "roles": [
         "TOP"
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Aatrox.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:sustained": "Tre colpi Q ripetibili e recupero sui danni sostengono più cicli mentre resta nello scontro.",
+        "style:duel": "Tre Q concatenate, scatto e cure sui campioni sostengono lo scambio lungo.",
+        "style:sidelane": "Q gestisce l'ondata; cure, scatto e minaccia di duello rendono costoso contestarlo."
+      }
     },
     {
       "id": "Ahri",
@@ -320,6 +326,7 @@
         "class:assassin"
       ],
       "tags": [
+        "style:engage",
         "style:poke",
         "style:burst"
       ],
@@ -328,7 +335,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Ahri.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "E arresta anche gli spostamenti e R le dà l'accesso per imporre una cattura.",
+        "style:poke": "Q percorre andata e ritorno e permette pressione ripetuta a distanza prima della combo.",
+        "style:burst": "E crea una finestra per concentrare Q/W e colpi R in sequenza breve."
+      }
     },
     {
       "id": "Akali",
@@ -343,6 +355,7 @@
       ],
       "tags": [
         "style:burst",
+        "style:sustained",
         "style:duel"
       ],
       "roles": [
@@ -351,7 +364,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Akali.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:burst": "E con ricast ed R con esecuzione concentrano danno rapido sul bersaglio raggiunto.",
+        "style:sustained": "Q ogni 1,5 secondi alternata ai colpi passivi forma ciclo ripetuto, limitato dall'energia.",
+        "style:duel": "Passiva a cerchi, energia, velo e più scatti creano cicli ripetuti di entrata e uscita."
+      }
     },
     {
       "id": "Akshan",
@@ -366,6 +384,7 @@
         "class:assassin"
       ],
       "tags": [
+        "style:poke",
         "style:burst",
         "style:sustained",
         "style:sidelane"
@@ -376,7 +395,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Akshan.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "Q torna e prolunga la traiettoria attraversando unità: pressione tramite l'ondata senza entrare con E.",
+        "style:burst": "Terzo colpo passivo, fuoco E e raffica R concentrano la minaccia nell'apertura.",
+        "style:sustained": "Attacchi doppi e proc ogni tre colpi sono motore ricorrente distinto dall'apertura.",
+        "style:sidelane": "Boomerang attraversa l'ondata, doppio attacco pressa e rampino/camuffamento consentono uscita o rotazione."
+      }
     },
     {
       "id": "Alistar",
@@ -399,7 +424,11 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Alistar.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "W più Q combina ingresso, spostamento e lancio in aria affidabili.",
+        "style:peel": "W allontana una minaccia e Q solleva chi raggiunge gli alleati, offrendo disimpegno immediato."
+      }
     },
     {
       "id": "Ambessa",
@@ -424,7 +453,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Ambessa.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "R raggiunge da distanza, sopprime e poi stordisce il bersaglio scelto.",
+        "style:sustained": "Ogni abilità abilita attacchi potenziati che recuperano energia: alternanza strutturale.",
+        "style:duel": "Ogni abilità abilita scatto e attacco potenziato; lo scudo mantiene il ciclo.",
+        "style:sidelane": "Abilità ad area puliscono mentre scatti, scudo e duello sostengono la pressione autonoma."
+      }
     },
     {
       "id": "Amumu",
@@ -439,7 +474,8 @@
         "class:support"
       ],
       "tags": [
-        "style:engage"
+        "style:engage",
+        "style:sustained"
       ],
       "roles": [
         "JUNGLE",
@@ -447,7 +483,11 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Amumu.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "Q fornisce ingresso e R blocca un'intera area.",
+        "style:sustained": "W infligge danno percentuale ogni secondo e subire attacchi riduce recupero E."
+      }
     },
     {
       "id": "Anivia",
@@ -462,6 +502,7 @@
       ],
       "tags": [
         "style:peel",
+        "style:burst",
         "style:sustained",
         "style:zone"
       ],
@@ -470,7 +511,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Anivia.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:peel": "W separa gli inseguitori con un muro; Q e la tempesta rallentano o fermano il loro accesso agli alleati.",
+        "style:burst": "Q o R maturata raddoppiano E: finestra esplicita di danno concentrato accanto alla tempesta persistente.",
+        "style:sustained": "R mantiene tempesta dannosa e rende ripetibili E potenziate sugli occupanti.",
+        "style:zone": "W crea terreno invalicabile e R mantiene un'ampia area pericolosa."
+      }
     },
     {
       "id": "Annie",
@@ -486,7 +533,8 @@
       ],
       "tags": [
         "style:engage",
-        "style:burst"
+        "style:burst",
+        "style:sustained"
       ],
       "roles": [
         "MIDDLE",
@@ -494,7 +542,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Annie.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "La passiva converte Tibbers o W in un'apertura ad area preparabile e immediata.",
+        "style:burst": "Stordimento preparato e danno iniziale Tibbers si combinano con Q/W in una scarica breve.",
+        "style:sustained": "Tibbers resta evocato, attacca e brucia vicini: danno persistente distinto dall'impatto R."
+      }
     },
     {
       "id": "Aphelios",
@@ -508,6 +561,8 @@
         "class:marksman"
       ],
       "tags": [
+        "style:poke",
+        "style:burst",
         "style:sustained",
         "style:zone"
       ],
@@ -517,7 +572,13 @@
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Aphelios.json"
       ],
-      "notes": "Il controllo dell’area dipende dalle armi disponibili, soprattutto dalla sentinella di Crescendum."
+      "notes": "Il controllo dell’area dipende dalle armi disponibili, soprattutto dalla sentinella di Crescendum.",
+      "tag_reasons": {
+        "style:poke": "Con Calibrum, tiro Q e attacco sul marchio proiettano danno a lunga distanza; condizionato all'arma disponibile.",
+        "style:burst": "R infligge danno e attacchi dell'arma ai bersagli colpiti; combinazioni come Infernum concentrano la scarica.",
+        "style:sustained": "Armi modificano attacchi/abilità; produzione continua strutturale attraverso la rotazione.",
+        "style:zone": "La sentinella di Crescendum rimane sul terreno e proietta ripetutamente l'arma secondaria."
+      }
     },
     {
       "id": "Ashe",
@@ -542,7 +603,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Ashe.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "R è una suprema globale di stordimento concepita per aprire catture.",
+        "style:poke": "W a ventaglio applica danno e rallentamento ripetibili oltre gli attacchi ordinari.",
+        "style:sustained": "Q aumenta velocità e trasforma colpi in raffiche sostenute dai rallentamenti."
+      }
     },
     {
       "id": "AurelionSol",
@@ -564,7 +630,11 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/AurelionSol.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:sustained": "Q infligge danno per secondo e durante W può durare senza limite normale.",
+        "style:zone": "E mantiene un buco nero che danneggia, trascina ed esegue chi resta al centro."
+      }
     },
     {
       "id": "Aurora",
@@ -588,7 +658,11 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Aurora.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:burst": "Q con richiamo, E e shockwave R concentrano danno nella finestra di scambio.",
+        "style:zone": "R mantiene un perimetro che rallenta i nemici quando tentano di attraversarlo."
+      }
     },
     {
       "id": "Azir",
@@ -604,15 +678,24 @@
       ],
       "tags": [
         "style:engage",
+        "style:poke",
         "style:sustained",
-        "style:zone"
+        "style:zone",
+        "style:sidelane"
       ],
       "roles": [
         "MIDDLE"
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Azir.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "E e R consentono un ingresso seguito da spostamento di massa.",
+        "style:poke": "Soldati riposizionati con Q proiettano attacchi e pressione mantenendo Azir dietro la loro zona.",
+        "style:sustained": "Soldati sostituiscono gli attacchi e colpiscono ripetutamente nella zona comandata.",
+        "style:zone": "I soldati persistono, spostano la minaccia degli attacchi e possono formare una parete con R.",
+        "style:sidelane": "Soldati puliscono e colpiscono a distanza; E offre uscita e la passiva crea una torre."
+      }
     },
     {
       "id": "Bard",
@@ -635,7 +718,11 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Bard.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "R apre finestre da grande distanza e Q consolida la cattura.",
+        "style:peel": "I santuari curano e accelerano gli alleati; R può sospendere una minaccia o mettere un alleato in stasi."
+      }
     },
     {
       "id": "Belveth",
@@ -657,7 +744,11 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Belveth.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:sustained": "Velocità crescente permanente, bonus dopo abilità ed E multicolpo sostengono ciclo continuo.",
+        "style:duel": "Velocità d'attacco crescente, scatti direzionali e E con riduzione danni e rubavita."
+      }
     },
     {
       "id": "Blitzcrank",
@@ -679,7 +770,10 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Blitzcrank.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "Q forza direttamente una cattura spostando il bersaglio nella propria squadra."
+      }
     },
     {
       "id": "Brand",
@@ -694,6 +788,7 @@
         "class:support"
       ],
       "tags": [
+        "style:poke",
         "style:burst",
         "style:sustained"
       ],
@@ -705,7 +800,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Brand.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "W a distanza e propagazione E sugli incendiati consentono pressione ripetuta senza ingresso.",
+        "style:burst": "Tre accumuli detonano la passiva e rimbalzi R accelerano una scarica ad area.",
+        "style:sustained": "Passiva applica combustione accumulabile di quattro secondi riapplicata dalle abilità oltre alla detonazione."
+      }
     },
     {
       "id": "Braum",
@@ -721,14 +821,20 @@
       ],
       "tags": [
         "style:engage",
-        "style:peel"
+        "style:peel",
+        "style:zone"
       ],
       "roles": [
         "SUPPORT"
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Braum.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "R offre un lancio in aria lineare a distanza e lascia un corridoio rallentante.",
+        "style:peel": "E intercetta i proiettili, W conferisce resistenze all'alleato e passiva/R fermano gli aggressori.",
+        "style:zone": "R lascia sul terreno un corridoio persistente che rallenta chi lo attraversa."
+      }
     },
     {
       "id": "Briar",
@@ -752,7 +858,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Briar.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "R raggiunge il campione colpito e causa paura ad area all'arrivo.",
+        "style:sustained": "Sanguinamento accumulabile e frenesia con velocità d'attacco sostengono danno/recupero.",
+        "style:duel": "Sanguinamento e cure, frenesia d'attacco e difesa/recupero di E sostengono l'inseguimento."
+      }
     },
     {
       "id": "Caitlyn",
@@ -767,6 +878,7 @@
       ],
       "tags": [
         "style:poke",
+        "style:burst",
         "style:sustained",
         "style:zone"
       ],
@@ -775,7 +887,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Caitlyn.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "Q penetrante consente danno a distanza prima dello scontro; non si deduce il tag dai soli attacchi.",
+        "style:burst": "Rete/trappole abilitano la passiva potenziati su comando, concentrabili con Q.",
+        "style:sustained": "La passiva ricorre ogni pochi attacchi e integra il fuoco continuo oltre ai picchi su comando.",
+        "style:zone": "W crea una rete persistente di punti che immobilizzano e aprono la passiva."
+      }
     },
     {
       "id": "Camille",
@@ -791,6 +909,8 @@
       ],
       "tags": [
         "style:engage",
+        "style:burst",
+        "style:sustained",
         "style:duel",
         "style:sidelane"
       ],
@@ -799,7 +919,14 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Camille.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "E dà accesso con lancio in aria e Hextech Ultimatum impedisce la fuga del bersaglio.",
+        "style:burst": "Seconda Q dopo il ritardo aumenta il colpo e lo converte in vero: picco deliberato centrale.",
+        "style:sustained": "Q torna in ciclo breve, E concede velocità e R aggiunge danno percentuale agli attacchi.",
+        "style:duel": "Q a due tempi, scudo adattivo, cura e mobilità con R che isola il bersaglio.",
+        "style:sidelane": "Q e attacchi pressano strutture, mentre E e duello consentono pressione profonda."
+      }
     },
     {
       "id": "Cassiopeia",
@@ -813,9 +940,11 @@
         "class:mage"
       ],
       "tags": [
+        "style:poke",
         "style:sustained",
         "style:zone",
-        "style:duel"
+        "style:duel",
+        "style:sidelane"
       ],
       "roles": [
         "TOP",
@@ -823,7 +952,14 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Cassiopeia.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "Q avvelena a distanza con recupero breve: pressione prima di avvicinarsi per E.",
+        "style:sustained": "E ripetuta aumenta danno su avvelenati e recupera salute: ciclo centrale.",
+        "style:zone": "W persiste come campo di rallentamento e grounding, negando i movimenti rapidi nell'area.",
+        "style:duel": "E reiterabile su veleno cura, mentre velocità e W regolano la distanza.",
+        "style:sidelane": "Veleno ed E eliminano l'ondata; cura, velocità e Grounded proteggono il duello laterale."
+      }
     },
     {
       "id": "Chogath",
@@ -838,8 +974,7 @@
         "class:mage"
       ],
       "tags": [
-        "style:burst",
-        "style:zone"
+        "style:burst"
       ],
       "roles": [
         "TOP",
@@ -847,7 +982,10 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Chogath.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:burst": "Controllo delle abilità prepara R, colpo di vero elevato che concentra la minaccia finale."
+      }
     },
     {
       "id": "Corki",
@@ -872,7 +1010,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Corki.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "R accumula missili ripetibili, con missile potenziato ogni tre lanci.",
+        "style:burst": "Q, cono E e missile R concentrano danno con gli attacchi nello scambio breve, accanto al ciclo lungo.",
+        "style:sustained": "Passiva sugli attacchi, cono E persistente e missili conservati sostengono danno tra i picchi."
+      }
     },
     {
       "id": "Darius",
@@ -896,7 +1039,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Darius.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:sustained": "Sanguinamento si accumula con attacchi/abilità fino al massimo bonus d'attacco.",
+        "style:duel": "Emorragia accumulabile, cura di Q e presa premiano il contatto prolungato.",
+        "style:sidelane": "Q pulisce e cura; accumuli, presa e minaccia nel duello puniscono il difensore singolo."
+      }
     },
     {
       "id": "Diana",
@@ -913,7 +1061,9 @@
       "tags": [
         "style:engage",
         "style:burst",
-        "style:sustained"
+        "style:sustained",
+        "style:duel",
+        "style:sidelane"
       ],
       "roles": [
         "JUNGLE",
@@ -921,7 +1071,14 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Diana.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "E consegna R, che trascina più nemici e li trattiene per l'impatto.",
+        "style:burst": "Q prepara ingresso E e detonazione R concentra danno nell'area dei bersagli attratti.",
+        "style:sustained": "Velocità dopo abilità e cleave ogni terzo attacco sostengono danno oltre R.",
+        "style:duel": "Terzo colpo, velocità d'attacco dopo le abilità, doppio scudo e reset condizionale dello scatto.",
+        "style:sidelane": "Passiva e abilità ad area puliscono; scudo, velocità d'attacco e scatto sostengono pressione e strutture."
+      }
     },
     {
       "id": "DrMundo",
@@ -936,7 +1093,9 @@
         "class:fighter"
       ],
       "tags": [
+        "style:poke",
         "style:sustained",
+        "style:duel",
         "style:sidelane"
       ],
       "roles": [
@@ -944,7 +1103,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/DrMundo.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "Q proietta ripetutamente danno basato sulla salute attuale e rallentamento senza ingresso.",
+        "style:sustained": "Attacco bonus dalla salute ed elettricità W sostengono colpi mentre R prolunga la permanenza.",
+        "style:duel": "Rigenerazione, recupero del danno di W e R lunga gli consentono di reiterare Q e attacchi.",
+        "style:sidelane": "W/E gestiscono gruppi e la rigenerazione con immunità al primo controllo consente pressione autonoma."
+      }
     },
     {
       "id": "Draven",
@@ -966,7 +1131,11 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Draven.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:sustained": "Riprendere asce mantiene attacchi potenziati e aggiorna il recupero del bonus W.",
+        "style:duel": "Catturare le asce rinnova danno e W, con E per interrompere e spaziare."
+      }
     },
     {
       "id": "Ekko",
@@ -983,6 +1152,7 @@
       "tags": [
         "style:burst",
         "style:zone",
+        "style:duel",
         "style:sidelane"
       ],
       "roles": [
@@ -991,7 +1161,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Ekko.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:burst": "Terzo colpo passivo e attacco E concentrano la sequenza; R aggiunge forte esplosione.",
+        "style:zone": "W preannuncia e poi mantiene un'anomalia che rallenta e può stordire.",
+        "style:duel": "Ciclo a tre colpi, velocità, scudo/stordimento e R con cura permettono scambi ripetuti.",
+        "style:sidelane": "Q pulisce in andata e ritorno; E e soprattutto R offrono una via d'uscita affidabile."
+      }
     },
     {
       "id": "Elise",
@@ -1007,14 +1183,22 @@
       ],
       "tags": [
         "style:engage",
-        "style:burst"
+        "style:burst",
+        "style:sustained",
+        "style:duel"
       ],
       "roles": [
         "JUNGLE"
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Elise.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "Cocoon apre la cattura a distanza e Rappel permette di raggiungere o seguire il bersaglio.",
+        "style:burst": "Q umana sulla salute alta e Q ragno sulla salute bassa concentrano la combo tra forme.",
+        "style:sustained": "Forma ragno ha attacchi con danno/cura, ragnetti persistenti e W con velocità d'attacco.",
+        "style:duel": "Le due forme alternano poke e controllo con attacchi curativi, velocità e Rappel."
+      }
     },
     {
       "id": "Evelynn",
@@ -1036,7 +1220,10 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Evelynn.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:burst": "Marchio W, Q/E e R di uscita concentrano una sequenza rapida."
+      }
     },
     {
       "id": "Ezreal",
@@ -1059,7 +1246,11 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Ezreal.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "Q a distanza riduce i recuperi colpendo e sostiene pressione ripetuta.",
+        "style:sustained": "Q riduce recuperi colpendo e passiva accumula velocità per sostenere abilità/attacchi."
+      }
     },
     {
       "id": "Fiddlesticks",
@@ -1075,7 +1266,9 @@
       ],
       "tags": [
         "style:engage",
-        "style:burst"
+        "style:burst",
+        "style:sustained",
+        "style:zone"
       ],
       "roles": [
         "JUNGLE",
@@ -1083,7 +1276,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Fiddlesticks.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "R da fuori visione, insieme alla paura, impone un'apertura ad area.",
+        "style:burst": "Ingresso con paura passiva/R prepara il colpo Q sui già impauriti e W che conclude entro 2 secondi con danno percentuale sulla salute mancante: burst preparato accanto al danno persistente R.",
+        "style:sustained": "W drena durante canalizzazione e R infligge danno per secondo: motore persistente centrale.",
+        "style:zone": "R mantiene per più secondi un'ampia minaccia attorno a Fiddlesticks mentre si muove."
+      }
     },
     {
       "id": "Fiora",
@@ -1107,7 +1306,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Fiora.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:sustained": "Vitali ripetibili, Q che applica effetti e due attacchi E rapidi sostengono lo scambio.",
+        "style:duel": "Vital, affondo, parata e cura della R sono esplicitamente costruiti sul singolo avversario.",
+        "style:sidelane": "Duello sui Vital, cura, mobilità e attacchi potenziati creano una minaccia laterale primaria."
+      }
     },
     {
       "id": "Fizz",
@@ -1122,15 +1326,19 @@
         "class:fighter"
       ],
       "tags": [
-        "style:burst",
-        "style:duel"
+        "style:engage",
+        "style:burst"
       ],
       "roles": [
         "MIDDLE"
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Fizz.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "R è una suprema da cattura a distanza con rallentamento e lancio in aria ad area.",
+        "style:burst": "Attacco W potenziato, Q/E e detonazione pesce R formano una breve finestra di uccisione."
+      }
     },
     {
       "id": "Galio",
@@ -1147,6 +1355,7 @@
       "tags": [
         "style:engage",
         "style:peel",
+        "style:poke",
         "style:burst"
       ],
       "roles": [
@@ -1155,7 +1364,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Galio.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "E e W aprono localmente; R aggiunge un arrivo con lancio in aria.",
+        "style:peel": "R protegge gli alleati nell'area con uno scudo magico e solleva gli aggressori; W può deviarne gli attacchi.",
+        "style:poke": "Q proietta due colpi e tornado di danno sulla salute massima senza impegnare E/W.",
+        "style:burst": "Passiva potenziata e controllo E/W permettono di concentrare Q e colpi della combo."
+      }
     },
     {
       "id": "Gangplank",
@@ -1179,7 +1394,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Gangplank.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "Q e barili detonabili proiettano danno e rallentamento senza ingresso in mischia.",
+        "style:burst": "Barili trasmettono e concentrano il danno del colpo in un'esplosione anche concatenata.",
+        "style:zone": "E costruisce catene di barili persistenti e R mantiene un bombardamento d'area.",
+        "style:sidelane": "Barili gestiscono l'ondata, passiva incendia in mischia e R contribuisce globalmente dopo la spinta."
+      }
     },
     {
       "id": "Garen",
@@ -1204,7 +1425,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Garen.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:burst": "Q e breve rotazione E preparano esecuzione R: minaccia concentrata nell'ingresso.",
+        "style:duel": "Riduzione danni, tenacia e rigenerazione sostengono più contatti prima dell'esecuzione.",
+        "style:sidelane": "E pulisce, Q accelera e W/rigenerazione consentono di assorbire e ripetere la pressione."
+      }
     },
     {
       "id": "Gnar",
@@ -1221,7 +1447,9 @@
       "tags": [
         "style:engage",
         "style:poke",
-        "style:duel"
+        "style:sustained",
+        "style:duel",
+        "style:sidelane"
       ],
       "roles": [
         "TOP"
@@ -1229,7 +1457,14 @@
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Gnar.json"
       ],
-      "notes": "I tag coprono Mini Gnar e Mega Gnar; la forma disponibile condiziona pressione a distanza e inizio dello scontro."
+      "notes": "I tag coprono Mini Gnar e Mega Gnar; la forma disponibile condiziona pressione a distanza e inizio dello scontro.",
+      "tag_reasons": {
+        "style:engage": "In forma Mega, Hop, Wallop e R offrono ingresso e controllo di massa con forte interazione col terreno.",
+        "style:poke": "Mini Gnar riduce il recupero Q prendendo il boomerang; Mega Gnar può raccogliere il masso.",
+        "style:sustained": "Mini applica danno percentuale ogni terzo colpo ed E aumenta velocità; condizionato alla forma Mini.",
+        "style:duel": "Iper accumula sullo stesso bersaglio; boomerang, velocità, salto e trasformazione danno continuità.",
+        "style:sidelane": "Boomerang gestisce l'ondata; Hyper premia tre colpi sul difensore e dà velocità, mentre Mega aggiunge sopravvivenza e controllo."
+      }
     },
     {
       "id": "Gragas",
@@ -1246,7 +1481,8 @@
       "tags": [
         "style:engage",
         "style:peel",
-        "style:burst"
+        "style:burst",
+        "style:zone"
       ],
       "roles": [
         "TOP",
@@ -1255,7 +1491,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Gragas.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "E e R combinano accesso, interruzione e riposizionamento dei nemici.",
+        "style:peel": "R disperde e allontana gli avversari; E interrompe l'avvicinamento con collisione e stordimento.",
+        "style:burst": "Attacco W caricato e controllo E concentrano Q/R in sequenza breve.",
+        "style:zone": "Q lascia un barile che fermenta fino alla detonazione e condiziona il passaggio nell'area."
+      }
     },
     {
       "id": "Graves",
@@ -1269,15 +1511,25 @@
         "class:marksman"
       ],
       "tags": [
+        "style:burst",
         "style:sustained",
-        "style:duel"
+        "style:zone",
+        "style:duel",
+        "style:sidelane"
       ],
       "roles": [
         "JUNGLE"
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Graves.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:burst": "Scariche del fucile, detonazione Q e colpo R si concentrano nell'apertura; E abbrevia il ciclo.",
+        "style:sustained": "Danno costruito su scariche ripetute; E abbrevia il ciclo e recupera con attacchi.",
+        "style:zone": "W mantiene una nube che riduce drasticamente la visione finché il nemico vi resta.",
+        "style:duel": "Gli attacchi riducono E, che rinnova mobilità e resistenze durante il combattimento.",
+        "style:sidelane": "Fucile e Q puliscono rapidamente; E rinnova mobilità e resistenze nel duello."
+      }
     },
     {
       "id": "Gwen",
@@ -1301,7 +1553,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Gwen.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:sustained": "Attacchi applicano percentuale/cura ed E aumenta velocità/danno e recupera colpendo.",
+        "style:duel": "Passiva curativa, Q accumulata, nebbia e rimborso di E sostengono il corpo a corpo.",
+        "style:sidelane": "Q e attacchi puliscono e pressano; cura, nebbia ed E sostengono il confronto laterale."
+      }
     },
     {
       "id": "Hecarim",
@@ -1317,14 +1574,22 @@
       ],
       "tags": [
         "style:engage",
-        "style:sustained"
+        "style:sustained",
+        "style:duel",
+        "style:sidelane"
       ],
       "roles": [
         "JUNGLE"
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Hecarim.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "R attraversa la linea avversaria e applica paura ad area.",
+        "style:sustained": "Q colpita aumenta danno e riduce recupero delle successive; W aggiunge danno continuo.",
+        "style:duel": "Q si potenzia e accelera con colpi successivi; W aggiunge resistenze e cure.",
+        "style:sidelane": "Q ripetuta pulisce e si potenzia/accorcia nel contatto; W aggiunge resistenze e cura, mentre la velocità consente rotazione."
+      }
     },
     {
       "id": "Heimerdinger",
@@ -1340,8 +1605,10 @@
       ],
       "tags": [
         "style:poke",
+        "style:burst",
         "style:sustained",
-        "style:zone"
+        "style:zone",
+        "style:sidelane"
       ],
       "roles": [
         "TOP",
@@ -1350,7 +1617,14 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Heimerdinger.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "W lancia razzi a lunga distanza ripetibili, distinti dalla presenza delle torrette.",
+        "style:burst": "Granata carica raggi delle torrette e W concentrata/UPGRADE creano scarica distinta dagli attacchi persistenti.",
+        "style:sustained": "Torrette persistenti attaccano e accumulano raggi finché mantiene la posizione.",
+        "style:zone": "Le torrette persistono e proiettano attacchi ripetuti, costruendo zone difese.",
+        "style:sidelane": "Torrette autonome puliscono e infliggono anche danno alle torri; granata e potenziamento difendono la posizione."
+      }
     },
     {
       "id": "Hwei",
@@ -1375,7 +1649,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Hwei.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "Varianti offensive Q permettono danno proiettato a distanza prima dell'ingresso.",
+        "style:burst": "Seconda abilità detonante della passiva ed esplosione R concentrano le combinazioni offensive.",
+        "style:zone": "Il repertorio include Molten Fissure e visioni di controllo che mantengono pericoli e vincoli nello spazio."
+      }
     },
     {
       "id": "Illaoi",
@@ -1400,7 +1679,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Illaoi.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:sustained": "Tentacoli persistenti colpiscono bersagli W/spiriti e sostengono cicli nell'area.",
+        "style:zone": "I tentacoli persistono nel terreno e minacciano colpi ripetuti attorno agli spiriti e ai Vessel.",
+        "style:duel": "Spirito, tentacoli e cure sui campioni convertono una posizione preparata in pressione prolungata.",
+        "style:sidelane": "Tentacoli e Q puliscono; spirito, cure e R puniscono chi prova a rimuoverla dalla corsia."
+      }
     },
     {
       "id": "Irelia",
@@ -1416,6 +1701,7 @@
       ],
       "tags": [
         "style:sustained",
+        "style:zone",
         "style:duel",
         "style:sidelane"
       ],
@@ -1425,7 +1711,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Irelia.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:sustained": "Abilità accumulano velocità/danno sul colpo; Q si aggiorna su marchi o uccisioni.",
+        "style:zone": "R lascia una parete di lame che danneggia e rallenta chi la attraversa.",
+        "style:duel": "Accumuli d'attacco, Q con cura e reset, riduzione danni e marchi formano un ciclo continuo.",
+        "style:sidelane": "Q con reset e cura attraversa l'ondata, accumula velocità e abilita forte duello sul difensore."
+      }
     },
     {
       "id": "Ivern",
@@ -1441,6 +1733,7 @@
       ],
       "tags": [
         "style:peel",
+        "style:sustained",
         "style:zone"
       ],
       "roles": [
@@ -1448,7 +1741,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Ivern.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:peel": "E protegge un alleato con uno scudo e rallenta le minacce vicine; Daisy offre controllo ripetuto.",
+        "style:sustained": "Daisy attacca per la durata ed emette shockwave ogni terzo colpo; W integra danno dal cespuglio.",
+        "style:zone": "W crea cespugli durevoli che alterano visione, percorsi sicuri e proiezione degli attacchi alleati."
+      }
     },
     {
       "id": "Janna",
@@ -1470,7 +1768,10 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Janna.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:peel": "E protegge con uno scudo; Q interrompe gli ingressi e R allontana gli avversari mentre cura gli alleati."
+      }
     },
     {
       "id": "JarvanIV",
@@ -1486,6 +1787,7 @@
       ],
       "tags": [
         "style:engage",
+        "style:burst",
         "style:zone"
       ],
       "roles": [
@@ -1493,7 +1795,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/JarvanIV.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "La combo stendardo-lancia lancia in aria e R chiude i bersagli nel terreno creato.",
+        "style:burst": "E-Q, primo attacco sulla salute attuale e impatto R concentrano la minaccia all'arrivo.",
+        "style:zone": "R crea un anello di terreno persistente che imprigiona e ridisegna il passaggio."
+      }
     },
     {
       "id": "Jax",
@@ -1517,7 +1824,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Jax.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:sustained": "Attacchi consecutivi aumentano velocità e ogni terzo colpo infligge bonus magico.",
+        "style:duel": "Velocità d'attacco crescente, colpi periodici, schivata e resistenze scalano nel duello.",
+        "style:sidelane": "Attacchi crescenti pressano, mentre salto, schivata e resistenze sostengono duello e uscita."
+      }
     },
     {
       "id": "Jayce",
@@ -1533,7 +1845,9 @@
       ],
       "tags": [
         "style:poke",
-        "style:burst"
+        "style:burst",
+        "style:duel",
+        "style:sidelane"
       ],
       "roles": [
         "TOP",
@@ -1541,7 +1855,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Jayce.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "In forma cannone Q attraverso E guadagna gittata e danno: pressione caratteristica della forma.",
+        "style:burst": "Raffica W-cannone e passaggio al martello con colpo potenziato concentrano danno distinto dal tiro lungo.",
+        "style:duel": "Le due forme offrono due cicli completi, mana sugli attacchi, resistenze, velocità e respinta.",
+        "style:sidelane": "Due forme danno pulizia, attacchi rapidi, resistenze, respinta e velocità per pressione autonoma."
+      }
     },
     {
       "id": "Jhin",
@@ -1565,7 +1885,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Jhin.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "Q rimbalza attraverso l'ondata e cresce dopo uccisioni: poke condizionato ai rimbalzi, non ai soli attacchi o R.",
+        "style:burst": "Quarto proiettile con esecuzione e Q concentrano danno in colpi preparati.",
+        "style:zone": "E accumula trappole invisibili persistenti con rallentamento ed esplosione."
+      }
     },
     {
       "id": "Jinx",
@@ -1579,14 +1904,19 @@
         "class:marksman"
       ],
       "tags": [
-        "style:sustained"
+        "style:sustained",
+        "style:zone"
       ],
       "roles": [
         "BOTTOM"
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Jinx.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:sustained": "Q offre velocità crescente o razzi ad area; takedown aumentano ulteriormente cadenza.",
+        "style:zone": "Flame Chompers resta come linea di trappole che blocca un corridoio e immobilizza i campioni."
+      }
     },
     {
       "id": "KSante",
@@ -1603,14 +1933,23 @@
       "tags": [
         "style:engage",
         "style:peel",
-        "style:duel"
+        "style:sustained",
+        "style:duel",
+        "style:sidelane"
       ],
       "roles": [
         "TOP"
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/KSante.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "W, Q e R spostano, stordiscono e isolano un bersaglio.",
+        "style:peel": "E può schermare un alleato; in forma difensiva W respinge gli aggressori e R può separarli dalla squadra.",
+        "style:sustained": "Q ripetuta marca per attacco seguente; R riduce recuperi e aumenta danno/recupero.",
+        "style:duel": "Accumuli di Q, difesa caricata, scudo mobile e R isolano e sostengono il bersaglio.",
+        "style:sidelane": "Q ripetuta pulisce, E/W difendono e R isola il singolo difensore."
+      }
     },
     {
       "id": "Kaisa",
@@ -1625,6 +1964,7 @@
         "class:mage"
       ],
       "tags": [
+        "style:poke",
         "style:burst",
         "style:sustained",
         "style:duel"
@@ -1634,7 +1974,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Kaisa.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "W evoluta riduce il recupero colpendo campioni, rendendo ripetibile il tiro lungo; richiede evoluzione tramite AP.",
+        "style:burst": "Q concentra missili su isolato e detonazione Plasma aggiunge picco nella sequenza breve.",
+        "style:sustained": "Attacchi accumulano Plasma ed E aumenta velocità con recupero ridotto dagli attacchi.",
+        "style:duel": "Plasma sullo stesso bersaglio, accelerazione/invisibilità e R con scudo sostengono il focus."
+      }
     },
     {
       "id": "Kalista",
@@ -1657,7 +2003,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Kalista.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "R trasforma l'alleato vincolato in un ingresso che respinge più campioni.",
+        "style:sustained": "Attacchi impilano lance per E e sono sostenuti dai balzi passivi.",
+        "style:duel": "Ogni attacco riposiziona e accumula lance; E converte la continuità in danno e rallentamento."
+      }
     },
     {
       "id": "Karma",
@@ -1682,7 +2033,11 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Karma.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:peel": "E combina scudo e velocità di movimento; R estende questa protezione a più alleati.",
+        "style:poke": "Q e Q con R proiettano danno ad area e rallentamento ripetibili."
+      }
     },
     {
       "id": "Karthus",
@@ -1706,7 +2061,11 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Karthus.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:sustained": "Q ripetuta ed aura E mantengono danno anche nella forma dopo la morte.",
+        "style:zone": "W lascia uno schermo rallentante e E sostiene una minaccia continua attorno a lui."
+      }
     },
     {
       "id": "Kassadin",
@@ -1722,6 +2081,7 @@
       ],
       "tags": [
         "style:burst",
+        "style:sustained",
         "style:duel",
         "style:sidelane"
       ],
@@ -1730,7 +2090,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Kassadin.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:burst": "R, Q/E e attacco W potenziato concentrano la scarica dopo il teletrasporto.",
+        "style:sustained": "R arriva a 2 secondi ai ranghi alti ed E recupera sui lanci vicini; condizionato a rango/mana.",
+        "style:duel": "R è reiterabile, W ripristina mana e Q protegge dal danno magico durante i cicli.",
+        "style:sidelane": "E gestisce l'ondata e R ripetuta consente di uscire o raggiungere rapidamente un combattimento."
+      }
     },
     {
       "id": "Katarina",
@@ -1752,7 +2118,10 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Katarina.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:burst": "Pugnali, E e breve R concentrano danno; reset consentono altre scariche sui takedown."
+      }
     },
     {
       "id": "Kayle",
@@ -1768,6 +2137,7 @@
       ],
       "tags": [
         "style:sustained",
+        "style:duel",
         "style:sidelane"
       ],
       "roles": [
@@ -1776,7 +2146,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Kayle.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:sustained": "Crescita di livello aggiunge velocità/portata/ondate agli attacchi oltre al danno E sul colpo.",
+        "style:duel": "Attacchi progressivamente potenziati, cura/velocità ed invulnerabilità sostengono il confronto.",
+        "style:sidelane": "Attacchi evoluti e onde di fuoco puliscono e pressano; cura/velocità e R proteggono la permanenza."
+      }
     },
     {
       "id": "Kayn",
@@ -1792,7 +2167,9 @@
       ],
       "tags": [
         "style:burst",
-        "style:sustained"
+        "style:sustained",
+        "style:duel",
+        "style:sidelane"
       ],
       "roles": [
         "JUNGLE"
@@ -1800,7 +2177,13 @@
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Kayn.json"
       ],
-      "notes": "I tag includono le due trasformazioni: burst per Assassino dell’Ombra e danno prolungato per Rhaast; non descrivono due proprietà sempre simultanee."
+      "notes": "I tag includono le due trasformazioni: burst per Assassino dell’Ombra e danno prolungato per Rhaast; non descrivono due proprietà sempre simultanee.",
+      "tag_reasons": {
+        "style:burst": "Assassino dell'Ombra amplifica i primi secondi e R chiude la scarica; condizionato alla forma.",
+        "style:sustained": "Rhaast cura dal danno delle abilità e mantiene cicli Q/W; condizionato alla forma Darkin.",
+        "style:duel": "La forma Darkin documentata cura sul danno da abilità e combina scatti, rallentamento e R difensiva.",
+        "style:sidelane": "Q/W puliscono; la forma Darkin aggiunge cura sostanziale nel duello e E attraversa terreno per uscire o ruotare."
+      }
     },
     {
       "id": "Kennen",
@@ -1815,7 +2198,9 @@
       ],
       "tags": [
         "style:engage",
-        "style:burst"
+        "style:poke",
+        "style:burst",
+        "style:zone"
       ],
       "roles": [
         "TOP",
@@ -1823,7 +2208,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Kennen.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "E porta R a contatto, accumulando stordimenti su più nemici.",
+        "style:poke": "Q è un proiettile a distanza con recupero fino a 4 secondi e marchi utili prima dell'ingresso.",
+        "style:burst": "Ingresso E e impulsi W/R concentrano danno e stordimento in breve finestra ad area.",
+        "style:zone": "R mantiene una tempesta mobile che minaccia danni e stordimenti ripetuti nell'area."
+      }
     },
     {
       "id": "Khazix",
@@ -1837,7 +2228,9 @@
         "class:assassin"
       ],
       "tags": [
+        "style:poke",
         "style:burst",
+        "style:sustained",
         "style:duel"
       ],
       "roles": [
@@ -1845,7 +2238,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Khazix.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "W è un proiettile esplosivo ripetibile a distanza; evoluzione W amplia ventaglio e aggiunge rallentamento.",
+        "style:burst": "Q sugli isolati e attacco passivo preparato dall'invisibilità concentrano la minaccia immediata.",
+        "style:sustained": "Q ha recupero breve, ridotto dall'evoluzione sugli isolati, per danno frequente nello stesso duello.",
+        "style:duel": "L'isolamento potenzia il singolo bersaglio e rimborsa Q; cura, salto e invisibilità permettono reiterazione."
+      }
     },
     {
       "id": "Kindred",
@@ -1860,6 +2259,7 @@
       ],
       "tags": [
         "style:sustained",
+        "style:zone",
         "style:duel"
       ],
       "roles": [
@@ -1867,7 +2267,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Kindred.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:sustained": "Attacchi/frecce Q si alternano a Wolf nella zona W; marchi migliorano il ciclo.",
+        "style:zone": "W proietta attacchi dentro una zona e R cambia le regole di sopravvivenza nella propria area.",
+        "style:duel": "Q si accorcia dentro W, la passiva di W cura, E premia tre colpi e R prolunga il confronto."
+      }
     },
     {
       "id": "Kled",
@@ -1882,6 +2287,8 @@
       ],
       "tags": [
         "style:engage",
+        "style:burst",
+        "style:sustained",
         "style:duel",
         "style:sidelane"
       ],
@@ -1890,7 +2297,14 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Kled.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "R crea un ingresso di squadra e aggancia il primo campione incontrato.",
+        "style:burst": "W concentra quattro attacchi rapidi con quarto potenziato, combinabili con Q/doppio E.",
+        "style:sustained": "Attacchi W accelerati e coraggio recuperato combattendo sostengono continuità prima/dopo il rimontare.",
+        "style:duel": "Quattro attacchi potenziati, doppio scatto e recupero di Skaarl dipendono dal continuare a combattere.",
+        "style:sidelane": "Abilità e attacchi sostengono ondata e duello; R crea ricongiungimento rapido dopo la spinta."
+      }
     },
     {
       "id": "KogMaw",
@@ -1906,7 +2320,8 @@
       ],
       "tags": [
         "style:poke",
-        "style:sustained"
+        "style:sustained",
+        "style:zone"
       ],
       "roles": [
         "MIDDLE",
@@ -1914,7 +2329,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/KogMaw.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "R è artiglieria ripetibile a grande distanza, limitata dal costo di mana crescente.",
+        "style:sustained": "W aggiunge portata/danno percentuale a ogni attacco con velocità passiva Q.",
+        "style:zone": "E lascia un sentiero rallentante e R riproietta ripetutamente minacce a grande distanza."
+      }
     },
     {
       "id": "Leblanc",
@@ -1937,7 +2357,11 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Leblanc.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "Q/R e ritorno W consentono pressione breve a distanza senza restare nello scontro.",
+        "style:burst": "Q detonabile e R concentrano le abilità in scarica breve con W di rientro."
+      }
     },
     {
       "id": "LeeSin",
@@ -1954,6 +2378,8 @@
       "tags": [
         "style:engage",
         "style:peel",
+        "style:burst",
+        "style:sustained",
         "style:duel"
       ],
       "roles": [
@@ -1961,7 +2387,14 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/LeeSin.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "La mobilità del kit consente a R di riposizionare un bersaglio e lanciare in aria chi investe.",
+        "style:peel": "R allontana direttamente una minaccia; W consente di raggiungere e schermare un alleato.",
+        "style:burst": "Q e ricast sulla salute mancante, attacchi passivi e R concentrano sequenza con finisher.",
+        "style:sustained": "Ogni abilità abilita due attacchi rapidi che restituiscono energia per sostenere altre abilità.",
+        "style:duel": "Ogni abilità abilita due attacchi con energia; scudi, onnivamp e scatti mantengono il ciclo."
+      }
     },
     {
       "id": "Leona",
@@ -1983,7 +2416,10 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Leona.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "E porta su un bersaglio, mentre Q e R lo bloccano."
+      }
     },
     {
       "id": "Lillia",
@@ -1999,7 +2435,11 @@
       ],
       "tags": [
         "style:engage",
-        "style:sustained"
+        "style:poke",
+        "style:burst",
+        "style:sustained",
+        "style:duel",
+        "style:sidelane"
       ],
       "roles": [
         "TOP",
@@ -2007,7 +2447,15 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Lillia.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "E può applicare Dream Dust da distanza e R addormenta tutti i bersagli marcati.",
+        "style:poke": "E viaggia fino a ostacolo/bersaglio e applica danno, rallentamento e polvere della passiva da lontano.",
+        "style:burst": "R amplifica il colpo di risveglio e centro W infligge danno elevato: burst preparato dal sonno.",
+        "style:sustained": "Passiva applica percentuale nel tempo e Q ripetuta mantiene velocità e produzione.",
+        "style:duel": "Q accumula velocità, il danno percentuale persiste e rallentamento/sonno proteggono il kiting.",
+        "style:sidelane": "Q ripetuta pulisce e accumula velocità durante i colpi; danno persistente sulla salute massima e kiting sostengono il duello."
+      }
     },
     {
       "id": "Lissandra",
@@ -2030,7 +2478,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Lissandra.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "E dà accesso e R offre stordimento selettivo o controllo ad area.",
+        "style:burst": "W/R immobilizzano per concentrare Q/E e tomba; esplosioni dei thrall ampliano il picco.",
+        "style:zone": "R emana ghiaccio oscuro che persiste, danneggia e rallenta attorno al bersaglio."
+      }
     },
     {
       "id": "Locke",
@@ -2047,14 +2500,21 @@
       "tags": [
         "style:burst",
         "style:sustained",
-        "style:duel"
+        "style:duel",
+        "style:sidelane"
       ],
       "roles": [
         "MIDDLE"
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Locke.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:burst": "Q marca per attacchi bonus, E porta il colpo e R può eseguire: scarica distinta dal motore On-Hit.",
+        "style:sustained": "Passiva aggiunge danno per attacco e W concede velocità: motore On-Hit distinto dall'esecuzione.",
+        "style:duel": "Marchi consumati dagli attacchi, velocità d'attacco/movimento e recupero del danno definiscono il ciclo.",
+        "style:sidelane": "Soul Nails ed E colpiscono più unità; velocità, recupero e teletrasporto/scatto sostengono la laterale."
+      }
     },
     {
       "id": "Lucian",
@@ -2070,7 +2530,9 @@
       ],
       "tags": [
         "style:burst",
-        "style:sustained"
+        "style:sustained",
+        "style:duel",
+        "style:sidelane"
       ],
       "roles": [
         "MIDDLE",
@@ -2078,7 +2540,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Lucian.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:burst": "Ogni abilità abilita doppio colpo, concentrando la combo iniziale oltre alla cadenza successiva.",
+        "style:sustained": "Abilità concedono doppio attacco e quei colpi riducono recupero E mantenendo l'alternanza.",
+        "style:duel": "Ogni abilità genera doppio colpo e questi colpi riducono lo scatto, creando una rotazione reiterabile.",
+        "style:sidelane": "Q attraversa l'ondata; ogni abilità genera doppi attacchi che riducono E, un ciclo reiterabile per pressione, duello e riposizionamento."
+      }
     },
     {
       "id": "Lulu",
@@ -2093,14 +2561,19 @@
         "class:mage"
       ],
       "tags": [
-        "style:peel"
+        "style:peel",
+        "style:poke"
       ],
       "roles": [
         "SUPPORT"
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Lulu.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:peel": "E scherma un alleato, W trasforma l'aggressore e R aumenta la salute dell'alleato sollevando le minacce vicine.",
+        "style:poke": "Q perfora e rallenta a distanza; Pix offre una seconda origine, riposizionabile con E per ripetere la pressione senza una build offensiva."
+      }
     },
     {
       "id": "Lux",
@@ -2116,7 +2589,8 @@
       ],
       "tags": [
         "style:poke",
-        "style:burst"
+        "style:burst",
+        "style:zone"
       ],
       "roles": [
         "MIDDLE",
@@ -2124,7 +2598,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Lux.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "E proietta danno ad area e Q minaccia a distanza prima della combo.",
+        "style:burst": "Q prepara E/R; R attiva la passiva e concentra danno a distanza.",
+        "style:zone": "E può restare attiva come anomalia rallentante finché Lux decide di detonarla."
+      }
     },
     {
       "id": "Malphite",
@@ -2148,7 +2627,11 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Malphite.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "R è un ingresso non interrompibile con lancio in aria ad area.",
+        "style:burst": "Impatto R e abilità ravvicinate concentrano l'ingresso senza richiedere una build AP."
+      }
     },
     {
       "id": "Malzahar",
@@ -2163,14 +2646,20 @@
       ],
       "tags": [
         "style:sustained",
-        "style:zone"
+        "style:zone",
+        "style:sidelane"
       ],
       "roles": [
         "MIDDLE"
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Malzahar.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:sustained": "E persiste e viene rinnovata dalle abilità richiamando Voidling sul bersaglio.",
+        "style:zone": "W evoca unità persistenti e R crea attorno al bersaglio un pool di energia negativa che dura oltre la soppressione.",
+        "style:sidelane": "Visioni si propagano tra le unità e i Voidling spingono; passiva e soppressione dissuadono il singolo ingaggio."
+      }
     },
     {
       "id": "Maokai",
@@ -2187,6 +2676,7 @@
       "tags": [
         "style:engage",
         "style:peel",
+        "style:poke",
         "style:zone"
       ],
       "roles": [
@@ -2196,7 +2686,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Maokai.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "W blocca il bersaglio e R apre su un fronte molto ampio.",
+        "style:peel": "Q respinge chi si avvicina agli alleati; W e R immobilizzano gli aggressori e ne interrompono l'avanzata.",
+        "style:poke": "E lascia arboscelli offensivi a distanza, più efficaci nei cespugli, che colpiscono chi si avvicina.",
+        "style:zone": "E piazza evocazioni-trappola persistenti che inseguono chi entra nella loro area."
+      }
     },
     {
       "id": "MasterYi",
@@ -2212,14 +2708,20 @@
       ],
       "tags": [
         "style:sustained",
-        "style:duel"
+        "style:duel",
+        "style:sidelane"
       ],
       "roles": [
         "JUNGLE"
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/MasterYi.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:sustained": "Doppio colpo, vero Wuju e velocità R sostengono il ciclo; attacchi recuperano Q.",
+        "style:duel": "Attacchi riducono Q; doppio colpo, danno vero, Meditazione e R sostengono il duello.",
+        "style:sidelane": "Q multi-bersaglio e attacchi puliscono e pressano; Meditazione e R sostengono duello e uscita."
+      }
     },
     {
       "id": "Mel",
@@ -2235,7 +2737,8 @@
       ],
       "tags": [
         "style:poke",
-        "style:burst"
+        "style:burst",
+        "style:zone"
       ],
       "roles": [
         "MIDDLE",
@@ -2243,7 +2746,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Mel.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "Q colpisce ripetutamente un'area a distanza ed E proietta danno e controllo.",
+        "style:burst": "Q/E accumulano Overwhelm e R concentra danno sui marchi; soglia passiva esegue.",
+        "style:zone": "Q colpisce ripetutamente la stessa area e E costruisce un campo ostile con danno nel tempo."
+      }
     },
     {
       "id": "Milio",
@@ -2265,7 +2773,10 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Milio.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:peel": "W/E curano o schermano gli alleati; R cura e rimuove controlli, mentre Q respinge una minaccia."
+      }
     },
     {
       "id": "MissFortune",
@@ -2281,14 +2792,22 @@
       ],
       "tags": [
         "style:poke",
-        "style:burst"
+        "style:burst",
+        "style:sustained",
+        "style:zone"
       ],
       "roles": [
         "BOTTOM"
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/MissFortune.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "Q rimbalza dietro il primo bersaglio con critico condizionale; E proietta una zona di danno.",
+        "style:burst": "R concentra molte ondate in breve canalizzazione e rimbalzo Q produce critico preparato.",
+        "style:sustained": "W aumenta velocità e la passiva ne riduce recupero per attacchi ripetuti oltre R.",
+        "style:zone": "E mantiene da lunga distanza un campo di onde che rallenta e danneggia; R sostiene inoltre una minaccia a cono per tutta la canalizzazione."
+      }
     },
     {
       "id": "MonkeyKing",
@@ -2305,7 +2824,8 @@
       "tags": [
         "style:engage",
         "style:sustained",
-        "style:duel"
+        "style:duel",
+        "style:sidelane"
       ],
       "roles": [
         "TOP",
@@ -2313,7 +2833,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/MonkeyKing.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "E e W consegnano i due lanci in aria di R.",
+        "style:sustained": "Q riduce armatura, E aumenta velocità e clone attacca sostenendo scambi lunghi.",
+        "style:duel": "Difese e rigenerazione si accumulano in combattimento; Q, clone e scatto mantengono il contatto.",
+        "style:sidelane": "Abilità ad area gestiscono l'ondata, mentre clone invisibile e scatto danno duello e uscita locale."
+      }
     },
     {
       "id": "Mordekaiser",
@@ -2337,7 +2863,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Mordekaiser.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:sustained": "Tre colpi attivano aura di danno che persiste vicino ai nemici.",
+        "style:duel": "Passiva a tre colpi, scudo/cura e R che isola rendono strutturale il confronto singolo.",
+        "style:sidelane": "Q/passiva puliscono e R rimuove il difensore dal resto della squadra, sostenendo la pressione autonoma."
+      }
     },
     {
       "id": "Morgana",
@@ -2353,6 +2884,8 @@
       ],
       "tags": [
         "style:peel",
+        "style:poke",
+        "style:sustained",
         "style:zone"
       ],
       "roles": [
@@ -2362,7 +2895,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Morgana.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:peel": "E combina scudo magico e immunità ai controlli, consentendo agli alleati di resistere a un ingresso.",
+        "style:poke": "W proietta danno persistente e recupera più rapidamente attraverso la passiva; Q aggiunge minaccia di cattura.",
+        "style:sustained": "W infligge danno per secondo crescente sulla salute mancante e recupera tramite cure passive.",
+        "style:zone": "W mantiene un cerchio di danno crescente che punisce la permanenza."
+      }
     },
     {
       "id": "Naafiri",
@@ -2377,7 +2916,9 @@
         "class:fighter"
       ],
       "tags": [
+        "style:poke",
         "style:burst",
+        "style:sustained",
         "style:duel"
       ],
       "roles": [
@@ -2386,7 +2927,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Naafiri.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "Q lancia due pugnali e richiama i compagni sul bersaglio: pressione senza ingresso personale.",
+        "style:burst": "Doppia Q con bonus sul sanguinante e assalto del branco concentrano la cattura.",
+        "style:sustained": "Compagni persistenti attaccano e Q applica sanguinamento oltre all'assalto iniziale.",
+        "style:duel": "Due pugnali con sanguinamento, branco persistente, E che lo cura e intargettabilità a ricarica breve sostengono più cicli."
+      }
     },
     {
       "id": "Nami",
@@ -2402,14 +2949,20 @@
       ],
       "tags": [
         "style:engage",
-        "style:peel"
+        "style:peel",
+        "style:poke"
       ],
       "roles": [
         "SUPPORT"
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Nami.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "R avanza a grande distanza, lancia in aria e prepara Q.",
+        "style:peel": "W cura gli alleati; Q e R interrompono gli aggressori, mentre la passiva aiuta gli alleati a riposizionarsi.",
+        "style:poke": "W colpisce a distanza e rimbalza fra nemici e alleati, combinando danno e cure per ripetere scambi e rientrare al sicuro."
+      }
     },
     {
       "id": "Nasus",
@@ -2425,6 +2978,7 @@
       ],
       "tags": [
         "style:sustained",
+        "style:zone",
         "style:duel",
         "style:sidelane"
       ],
@@ -2433,7 +2987,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Nasus.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:sustained": "Q accumulabile si ripete e R ne riduce recupero aggiungendo danno continuo vicino.",
+        "style:zone": "E mantiene un'ampia area di danno e riduzione dell'armatura.",
+        "style:duel": "Rubavita, Q crescente, W e difese della R sostengono e controllano il duello.",
+        "style:sidelane": "Q cresce sull'ondata e pressa con attacchi; rubavita, W e R sostengono il duello."
+      }
     },
     {
       "id": "Nautilus",
@@ -2456,7 +3016,10 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Nautilus.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "Q forza la presa e R garantisce un lancio in aria sul bersaglio selezionato."
+      }
     },
     {
       "id": "Neeko",
@@ -2472,6 +3035,7 @@
       ],
       "tags": [
         "style:engage",
+        "style:poke",
         "style:burst"
       ],
       "roles": [
@@ -2480,7 +3044,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Neeko.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "Travestimento e W aiutano a consegnare R, controllo di massa ad area.",
+        "style:poke": "Q a distanza rifiorisce sui campioni e consente scambi prima della R.",
+        "style:burst": "Controllo E e impatto R preparano scarica Q con più fioriture sullo stesso bersaglio."
+      }
     },
     {
       "id": "Nidalee",
@@ -2496,14 +3065,22 @@
       ],
       "tags": [
         "style:poke",
-        "style:burst"
+        "style:burst",
+        "style:zone",
+        "style:duel"
       ],
       "roles": [
         "JUNGLE"
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Nidalee.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "Q umana guadagna danno dalla distanza percorsa: poke distinto dall'ingresso felino.",
+        "style:burst": "Marchio della lancia amplifica accesso felino e Q felina cresce sulla salute mancante.",
+        "style:zone": "Bushwhack consente di distribuire trappole persistenti che rivelano e vulnerano chi attraversa.",
+        "style:duel": "Marchio Hunt, salto potenziato, attacchi curativi e cura/velocità d'attacco alternano inseguimento e recupero."
+      }
     },
     {
       "id": "Nilah",
@@ -2519,6 +3096,7 @@
       ],
       "tags": [
         "style:engage",
+        "style:burst",
         "style:sustained",
         "style:duel"
       ],
@@ -2527,7 +3105,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Nilah.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "E dà accesso tramite un'unità e R trascina i nemici circostanti.",
+        "style:burst": "E/Q e breve rotazione con attrazione R concentrano scarica ravvicinata accanto agli attacchi continui.",
+        "style:sustained": "Q concede velocità d'attacco, portata e attacchi a cono dopo il colpo; passiva Q aggiunge penetrazione e recupero. Motore nativo di attacchi continui.",
+        "style:duel": "Q estende gli attacchi, W schiva gli attacchi e due scatti sostengono il combattimento ravvicinato."
+      }
     },
     {
       "id": "Nocturne",
@@ -2544,14 +3128,21 @@
       "tags": [
         "style:engage",
         "style:sustained",
-        "style:duel"
+        "style:duel",
+        "style:sidelane"
       ],
       "roles": [
         "JUNGLE"
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Nocturne.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "R nega la visione e forza l'ingresso su un campione; E consolida la cattura.",
+        "style:sustained": "W dà velocità, Q aggiunge attacco sulla scia e gli attacchi recuperano il colpo passivo.",
+        "style:duel": "Attacchi curativi, velocità d'attacco, barriera magica e paura premiano il contatto continuato.",
+        "style:sidelane": "Passiva e Q puliscono; duello autosufficiente e R raggiunge un combattimento dopo la spinta."
+      }
     },
     {
       "id": "Nunu",
@@ -2570,14 +3161,21 @@
         "class:mage"
       ],
       "tags": [
-        "style:engage"
+        "style:engage",
+        "style:burst",
+        "style:zone"
       ],
       "roles": [
         "JUNGLE"
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Nunu.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "W crea un ingresso crescente che termina con un lancio in aria.",
+        "style:burst": "R converte canalizzazione in singola forte esplosione: finestra preparata e interrompibile.",
+        "style:zone": "R mantiene una vasta tormenta con rallentamento crescente e minaccia di detonazione finché Nunu canalizza."
+      }
     },
     {
       "id": "Olaf",
@@ -2593,7 +3191,8 @@
       ],
       "tags": [
         "style:sustained",
-        "style:duel"
+        "style:duel",
+        "style:sidelane"
       ],
       "roles": [
         "TOP",
@@ -2601,7 +3200,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Olaf.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:sustained": "Velocità/furto vita crescono a salute bassa; attacchi mantengono R e raccogliere asce aggiorna Q.",
+        "style:duel": "Velocità e rubavita crescono a poca vita; asce recuperabili, scudo e immunità ai controlli mantengono il focus.",
+        "style:sidelane": "Asce recuperabili e attacchi accelerati gestiscono e pressano; cure e immunità ai controlli sostengono il duello."
+      }
     },
     {
       "id": "Orianna",
@@ -2616,6 +3220,7 @@
         "class:support"
       ],
       "tags": [
+        "style:poke",
         "style:burst",
         "style:zone"
       ],
@@ -2624,7 +3229,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Orianna.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "Q riposiziona la sfera a distanza e W vi applica danno prima della R.",
+        "style:burst": "R riunisce bersagli sulla sfera e W/Q concentrano breve combo ad area.",
+        "style:zone": "La sfera resta ancorata e riproietta più abilità; Dissonance lascia inoltre un campo di velocità e rallentamento."
+      }
     },
     {
       "id": "Ornn",
@@ -2638,14 +3248,21 @@
         "class:tank"
       ],
       "tags": [
-        "style:engage"
+        "style:engage",
+        "style:burst",
+        "style:zone"
       ],
       "roles": [
         "TOP"
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Ornn.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "R apre da lunga distanza con rallentamento e lancio in aria di massa.",
+        "style:burst": "Brittle da W/R aumenta i colpi che lo consumano; doppia R prepara picchi percentuali.",
+        "style:zone": "Q genera un pilastro di magma persistente, terreno usabile anche da E."
+      }
     },
     {
       "id": "Pantheon",
@@ -2662,7 +3279,8 @@
       "tags": [
         "style:engage",
         "style:burst",
-        "style:duel"
+        "style:duel",
+        "style:sidelane"
       ],
       "roles": [
         "TOP",
@@ -2672,7 +3290,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Pantheon.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "R dà accesso strategico e W blocca immediatamente il bersaglio.",
+        "style:burst": "Abilità potenziate e accesso W concentrano lancia e colpi nello scambio breve.",
+        "style:duel": "La passiva rinnova versioni potenziate, Q può essere reiterata ed E difende durante la rotazione.",
+        "style:sidelane": "Q gestisce l'ondata, il kit regge il duello e R consente ricongiungimento a lunga distanza."
+      }
     },
     {
       "id": "Poppy",
@@ -2688,7 +3312,11 @@
       ],
       "tags": [
         "style:engage",
-        "style:peel"
+        "style:peel",
+        "style:burst",
+        "style:zone",
+        "style:duel",
+        "style:sidelane"
       ],
       "roles": [
         "TOP",
@@ -2697,7 +3325,15 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Poppy.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "E sposta e può stordire contro il terreno; W chiude le vie di fuga con dash.",
+        "style:peel": "W blocca gli scatti avversari; E e R possono allontanare o interrompere chi minaccia gli alleati.",
+        "style:burst": "Parete E assicura due esplosioni Q: scarica specifica rapida sulla salute massima.",
+        "style:zone": "Q lascia una zona a esplosione ritardata e W nega i dash nell'area circostante.",
+        "style:duel": "Q ripetibile, scudo recuperabile, resistenze a poca vita e controllo degli scatti sostengono il corpo a corpo.",
+        "style:sidelane": "Q ad area pulisce; scudo, resistenze e anti-scatti rendono difficile contestarla da sola."
+      }
     },
     {
       "id": "Pyke",
@@ -2720,7 +3356,11 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Pyke.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "Q sposta la vittima e E aggiunge accesso con stordimento.",
+        "style:burst": "Q/E aprono finestra e R esegue immediatamente sotto soglia con ripetizione sui takedown."
+      }
     },
     {
       "id": "Qiyana",
@@ -2743,7 +3383,11 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Qiyana.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "R converte il terreno vicino in uno stordimento ad area di apertura.",
+        "style:burst": "Bonus elementali, passiva iniziale e detonazione R concentrano scarica legata al terreno."
+      }
     },
     {
       "id": "Quinn",
@@ -2759,6 +3403,7 @@
       ],
       "tags": [
         "style:burst",
+        "style:sustained",
         "style:duel",
         "style:sidelane"
       ],
@@ -2767,7 +3412,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Quinn.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:burst": "Q/E e uscita R applicano la passiva consumabili per concentrare attacchi potenziati.",
+        "style:sustained": "Consumare la passiva concede velocità di attacco/movimento mantenendo marcature e colpi oltre l'apertura.",
+        "style:duel": "La passiva rinnova velocità d'attacco/movimento e E interrompe e ristabilisce la distanza.",
+        "style:sidelane": "Attacchi/abilità gestiscono l'ondata e R dà uscita e ricongiungimento eccezionali."
+      }
     },
     {
       "id": "Rakan",
@@ -2789,7 +3440,11 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Rakan.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "W e R combinano grande mobilità, lancio in aria e fascino multi-bersaglio.",
+        "style:peel": "E raggiunge e scherma ripetutamente gli alleati, Q li cura e W/R interrompono gli aggressori."
+      }
     },
     {
       "id": "Rammus",
@@ -2804,14 +3459,20 @@
       ],
       "tags": [
         "style:engage",
-        "style:peel"
+        "style:peel",
+        "style:sustained"
       ],
       "roles": [
         "JUNGLE"
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Rammus.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "Q e R danno ingresso, poi E blocca il bersaglio prioritario.",
+        "style:peel": "E obbliga una minaccia ad attaccare Rammus; W gli permette di assorbire quegli attacchi durante il diversivo.",
+        "style:sustained": "W restituisce danno e bonus d'attacco scala dalle difese; motore condizionato agli attacchi nemici."
+      }
     },
     {
       "id": "RekSai",
@@ -2827,14 +3488,22 @@
       ],
       "tags": [
         "style:engage",
-        "style:burst"
+        "style:burst",
+        "style:duel",
+        "style:sidelane"
       ],
       "roles": [
         "JUNGLE"
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/RekSai.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "Tunnel dà accesso durevole e Un-burrow lancia in aria il primo bersaglio raggiunto.",
+        "style:burst": "Uscita dal terreno, tre attacchi Q e morso con furia concentrano combo; R aggiunge colpo finale.",
+        "style:duel": "Furia, tre attacchi, cura sottoterra, morso potenziato e R sul marchio formano un ciclo singolo.",
+        "style:sidelane": "Q pulisce, furia cura e la rete di tunnel offre percorsi persistenti di uscita o rotazione."
+      }
     },
     {
       "id": "Rell",
@@ -2856,7 +3525,10 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Rell.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "Crash Down e R sono strumenti dedicati a entrare, sollevare e raggruppare più nemici."
+      }
     },
     {
       "id": "Renata",
@@ -2879,7 +3551,11 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Renata.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "R attraversa un fronte ampio e forza i nemici colpiti ad attaccarsi tra loro.",
+        "style:peel": "W può salvare un alleato da un esito letale; E lo scherma e Q/R interrompono o deviano gli aggressori."
+      }
     },
     {
       "id": "Renekton",
@@ -2895,14 +3571,22 @@
       ],
       "tags": [
         "style:burst",
-        "style:duel"
+        "style:sustained",
+        "style:duel",
+        "style:sidelane"
       ],
       "roles": [
         "TOP"
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Renekton.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:burst": "W con furia concentra tre colpi e si combina con Q/E nella finestra di stordimento.",
+        "style:sustained": "Attacchi generano furia e R infligge danno continuo e fornisce furia durante trasformazione.",
+        "style:duel": "Furia potenzia cura, stordimento e riduzione armatura; doppio scatto e R prolungano lo scambio.",
+        "style:sidelane": "Q ad area pulisce e cura; doppio scatto, furia e R sostengono il duello laterale."
+      }
     },
     {
       "id": "Rengar",
@@ -2918,6 +3602,7 @@
       ],
       "tags": [
         "style:burst",
+        "style:sustained",
         "style:duel",
         "style:sidelane"
       ],
@@ -2927,7 +3612,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Rengar.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:burst": "Salto e Q anche potenziata dalla ferocia concentrano attacchi e abilità nell'apertura.",
+        "style:sustained": "Ferocia rende ripetibili abilità potenziate; Q potenziata aumenta velocità oltre la prima scarica.",
+        "style:duel": "Ferocia ciclica, velocità d'attacco e cura del danno recente sostengono più azioni sul bersaglio.",
+        "style:sidelane": "Q/W gestiscono le unità; salti, cura e R permettono minaccia, uscita e ricongiungimento."
+      }
     },
     {
       "id": "Riven",
@@ -2943,6 +3634,7 @@
       ],
       "tags": [
         "style:burst",
+        "style:sustained",
         "style:duel",
         "style:sidelane"
       ],
@@ -2951,7 +3643,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Riven.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:burst": "Recast Q e attacchi passivi possono essere concentrati; Wind Slash aggiunge finisher nella finestra R.",
+        "style:sustained": "Abilità caricano attacchi bonus e Q offre tre recast sostenendo alternanza su più cicli.",
+        "style:duel": "Tre Q, cariche passive, stordimento e scudo mobile concatenano attacchi e difesa.",
+        "style:sidelane": "Q/W puliscono, mentre più scatti e scudo sostengono duello e fuga dalla pressione."
+      }
     },
     {
       "id": "Rumble",
@@ -2966,8 +3664,11 @@
         "class:mage"
       ],
       "tags": [
+        "style:poke",
         "style:sustained",
-        "style:zone"
+        "style:zone",
+        "style:duel",
+        "style:sidelane"
       ],
       "roles": [
         "TOP",
@@ -2975,7 +3676,14 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Rumble.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "E conserva due arpioni, danneggia e riduce la resistenza magica prima della mischia.",
+        "style:sustained": "Q/R infliggono danno continuo e surriscaldamento aggiunge velocità/danno agli attacchi.",
+        "style:zone": "R disegna una lunga parete di fiamme persistenti che rallenta e danneggia.",
+        "style:duel": "Q persistente, due arpioni e surriscaldamento danno continuità; scudo e velocità regolano il contatto.",
+        "style:sidelane": "Q persistente pulisce; scudo/velocità e due rallentamenti rendono sostenibile la pressione."
+      }
     },
     {
       "id": "Ryze",
@@ -2998,7 +3706,11 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Ryze.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:sustained": "W/E aggiornano Q e Flux amplifica/propaga le Q successive: ciclo offensivo ripetuto.",
+        "style:sidelane": "Flusso e sovraccarico puliscono in catena; R ricongiunge lui e l'ondata di alleati."
+      }
     },
     {
       "id": "Samira",
@@ -3021,7 +3733,11 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Samira.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:burst": "Catena attacchi/abilità prepara breve R ad alto danno con reset E sui takedown.",
+        "style:sustained": "Attacchi/abilità alternati preparano R e takedown aggiornano E sostenendo sequenze continuate."
+      }
     },
     {
       "id": "Sejuani",
@@ -3043,7 +3759,10 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Sejuani.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "Q porta in mischia e R apre a distanza con stordimento e tempesta rallentante."
+      }
     },
     {
       "id": "Senna",
@@ -3068,7 +3787,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Senna.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:peel": "Q cura gli alleati e R li scherma anche a distanza; W/E aiutano a fermare gli inseguitori o a riposizionarsi.",
+        "style:poke": "Q attraversa un bersaglio per danneggiare nemici più lontani; non dipende dai soli attacchi.",
+        "style:sustained": "Passiva cresce in danno/portata e Q alterna ai colpi oltre alla pressione iniziale."
+      }
     },
     {
       "id": "Seraphine",
@@ -3094,7 +3818,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Seraphine.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "R è un fascino a lunga portata che estende la gittata attraversando i campioni.",
+        "style:peel": "W protegge la squadra con scudi e può curarla; E/R ostacolano l'avvicinamento degli aggressori.",
+        "style:poke": "Q/E proiettano danno a distanza e la passiva può ripetere il lancio."
+      }
     },
     {
       "id": "Sett",
@@ -3110,7 +3839,10 @@
       ],
       "tags": [
         "style:engage",
-        "style:duel"
+        "style:burst",
+        "style:sustained",
+        "style:duel",
+        "style:sidelane"
       ],
       "roles": [
         "TOP",
@@ -3118,7 +3850,14 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Sett.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "R riposiziona un nemico nella squadra e E può stordire il gruppo risultante.",
+        "style:burst": "W converte Grit in colpo di vero elevato; E/R preparano scarica ad area.",
+        "style:sustained": "Attacchi alternati hanno secondo pugno più rapido/forte e Q potenzia due colpi percentuali.",
+        "style:duel": "Doppio pugno, danno sulla salute, rigenerazione e Grit trasformano danno subito in scudo e risposta.",
+        "style:sidelane": "Pugni e abilità ad area gestiscono la corsia; rigenerazione, scudo e duello puniscono il difensore."
+      }
     },
     {
       "id": "Shaco",
@@ -3133,7 +3872,9 @@
       ],
       "tags": [
         "style:burst",
-        "style:zone"
+        "style:sustained",
+        "style:zone",
+        "style:sidelane"
       ],
       "roles": [
         "JUNGLE",
@@ -3141,7 +3882,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Shaco.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:burst": "Attacco da invisibilità, bonus da dietro ed E sulla salute bassa concentrano apertura.",
+        "style:sustained": "Clone attaccante e scatole sparanti offrono danno persistente nativo dipendente dalle evocazioni.",
+        "style:zone": "W crea trappole invisibili persistenti che causano paura e attaccano.",
+        "style:sidelane": "Scatole e clone gestiscono/spingono, il clone colpisce le torri e Q invisibile offre uscita."
+      }
     },
     {
       "id": "Shen",
@@ -3155,7 +3902,9 @@
         "class:tank"
       ],
       "tags": [
+        "style:engage",
         "style:peel",
+        "style:sustained",
         "style:duel",
         "style:sidelane"
       ],
@@ -3165,7 +3914,14 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Shen.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "E è un ingresso con provocazione ad area; R può consegnarlo sul fronte alleato.",
+        "style:peel": "R scherma e raggiunge un alleato; W blocca attacchi nell'area ed E devia gli aggressori con una provocazione.",
+        "style:sustained": "Q prepara ripetutamente tre attacchi percentuali più forti dopo aver attraversato il bersaglio.",
+        "style:duel": "Attacchi percentuali, blocco degli attacchi, scudo ricorrente e provocazione sostengono lo scambio.",
+        "style:sidelane": "Q sostiene attacchi e duello; R consente di lasciare la laterale per la squadra."
+      }
     },
     {
       "id": "Shyvana",
@@ -3181,8 +3937,12 @@
       ],
       "tags": [
         "style:engage",
+        "style:poke",
+        "style:burst",
         "style:sustained",
-        "style:duel"
+        "style:zone",
+        "style:duel",
+        "style:sidelane"
       ],
       "roles": [
         "TOP",
@@ -3190,7 +3950,16 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Shyvana.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "R entra attraverso i nemici e, nello snapshot 16.13.1, li fa fuggire.",
+        "style:poke": "E-drago perfora ed esplode sui grandi bersagli lasciando scia: condizionato alla trasformazione del kit 16.13.1.",
+        "style:burst": "Q-drago del kit 16.13.1 ha ricast aggiuntivo con forte vero; W/E aggiungono detonazioni.",
+        "style:sustained": "Kit 16.13.1: attacchi percentuali riducono recupero Q; attacchi/abilità generano furia per mantenere forma.",
+        "style:zone": "In forma drago, accessibile tramite R, E attraversa i bersagli e lascia un sentiero di fuoco persistente.",
+        "style:duel": "Attacchi e abilità ad area, scudo/velocità e forma drago potenziata sostengono il contatto.",
+        "style:sidelane": "Q e danno ad area puliscono e pressano; scudo/velocità e forma drago danno duello e uscita."
+      }
     },
     {
       "id": "Singed",
@@ -3214,7 +3983,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Singed.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:sustained": "Q lascia scia continua di veleno e R sostiene il tempo trascorso a danneggiare con essa.",
+        "style:zone": "Q ridisegna continuamente lo spazio percorso e W lascia un campo di grounding.",
+        "style:sidelane": "Scia velenosa pulisce in movimento e velocità, grounding e statistiche della R consentono evasione."
+      }
     },
     {
       "id": "Sion",
@@ -3230,7 +4004,6 @@
       ],
       "tags": [
         "style:engage",
-        "style:zone",
         "style:sidelane"
       ],
       "roles": [
@@ -3238,7 +4011,11 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Sion.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "R forza un ingresso da grande distanza e termina con un lancio in aria.",
+        "style:sidelane": "Q/W puliscono, salute crescente sostiene la pressione e R consente uscita o ricongiungimento."
+      }
     },
     {
       "id": "Sivir",
@@ -3252,6 +4029,7 @@
         "class:marksman"
       ],
       "tags": [
+        "style:poke",
         "style:sustained"
       ],
       "roles": [
@@ -3259,7 +4037,11 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Sivir.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "Q percorre andata e ritorno a distanza prima di entrare nel ciclo di attacchi.",
+        "style:sustained": "W aumenta velocità/rimbalzi e gli attacchi durante R riducono recuperi."
+      }
     },
     {
       "id": "Skarner",
@@ -3274,7 +4056,10 @@
         "class:fighter"
       ],
       "tags": [
-        "style:engage"
+        "style:engage",
+        "style:sustained",
+        "style:duel",
+        "style:sidelane"
       ],
       "roles": [
         "TOP",
@@ -3282,7 +4067,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Skarner.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "E attraversa terreno e inchioda alla parete; R trascina fino a tre campioni.",
+        "style:sustained": "Q potenzia tre attacchi rapidi e Quaking applica percentuale nel tempo a massimi accumuli.",
+        "style:duel": "Quaking accumula fino al danno sulla salute massima; scudo, rallentamento e presa mantengono il bersaglio.",
+        "style:sidelane": "Q e terremoto gestiscono l'ondata; Quaking accumula danno sulla salute massima, W scherma ed E attraversa terreno."
+      }
     },
     {
       "id": "Smolder",
@@ -3307,7 +4098,11 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Smolder.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "W esplode sui campioni a distanza e offre pressione prima degli attacchi e della Q.",
+        "style:sustained": "Q/abilità crescono con la passiva sostenendo cicli ripetuti; Q evoluta aggiunge danno persistente."
+      }
     },
     {
       "id": "Sona",
@@ -3323,14 +4118,20 @@
       ],
       "tags": [
         "style:engage",
-        "style:peel"
+        "style:peel",
+        "style:poke"
       ],
       "roles": [
         "SUPPORT"
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Sona.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "R è una suprema lineare multi-bersaglio con stordimento immediato.",
+        "style:peel": "W ripete cure e scudi; E aiuta il riposizionamento e R interrompe una minaccia con lo stordimento.",
+        "style:poke": "Q colpisce campioni fino a 825 di portata e Accelerando ne sostiene la ripetizione senza build offensiva."
+      }
     },
     {
       "id": "Soraka",
@@ -3345,14 +4146,21 @@
         "class:mage"
       ],
       "tags": [
-        "style:peel"
+        "style:peel",
+        "style:poke",
+        "style:zone"
       ],
       "roles": [
         "SUPPORT"
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Soraka.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:peel": "W e R forniscono cure ripetute o globali; E silenzia gli aggressori e può immobilizzarli.",
+        "style:poke": "Q a 810 di portata ha recupero fino a 4 secondi e combina pressione ripetuta con recupero salute.",
+        "style:zone": "E mantiene una zona di silenzio che alla scadenza immobilizza chi è ancora dentro."
+      }
     },
     {
       "id": "Swain",
@@ -3368,7 +4176,8 @@
       ],
       "tags": [
         "style:sustained",
-        "style:zone"
+        "style:zone",
+        "style:duel"
       ],
       "roles": [
         "TOP",
@@ -3378,7 +4187,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Swain.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:sustained": "R drena continuamente finché raggiunge campioni e Q sostiene danno vicino.",
+        "style:zone": "R sostiene una zona di drenaggio mobile e E può ripetersi più spesso al suo interno.",
+        "style:duel": "R drena finché colpisce campioni, mentre E più frequente e frammenti curativi sostengono il ciclo."
+      }
     },
     {
       "id": "Sylas",
@@ -3394,6 +4208,7 @@
       ],
       "tags": [
         "style:burst",
+        "style:sustained",
         "style:duel"
       ],
       "roles": [
@@ -3403,7 +4218,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Sylas.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:burst": "Abilità e attacchi passivi accelerati concentrano combo; non si presume una R rubata specifica.",
+        "style:sustained": "Ogni abilità carica attacchi ad area accelerati e W cura per altri cicli in mischia.",
+        "style:duel": "Abilità e attacchi potenziati si alternano; W cura e i due scatti mantengono il contatto."
+      }
     },
     {
       "id": "Syndra",
@@ -3417,6 +4237,7 @@
         "class:mage"
       ],
       "tags": [
+        "style:poke",
         "style:burst",
         "style:zone"
       ],
@@ -3425,7 +4246,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Syndra.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "Q/W proiettano danno ad area a distanza; evoluzione passiva aggiunge una carica Q.",
+        "style:burst": "R scarica insieme le sfere e dopo evoluzione può eseguire i bersagli bassi.",
+        "style:zone": "Le Q restano sul terreno e diventano punti persistenti per W e E."
+      }
     },
     {
       "id": "TahmKench",
@@ -3442,6 +4268,8 @@
       "tags": [
         "style:engage",
         "style:peel",
+        "style:poke",
+        "style:sustained",
         "style:duel"
       ],
       "roles": [
@@ -3450,7 +4278,14 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/TahmKench.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "W offre accesso a distanza e lancio in aria ad area, sebbene telegrafato.",
+        "style:peel": "R mette un alleato al riparo e lo scherma all'uscita; Q/W offrono controllo contro gli inseguitori.",
+        "style:poke": "Q a 900 di portata infligge anche il danno passivo e cura sui campioni: pressione autonoma ripetibile.",
+        "style:sustained": "Attacchi applicano bonus dalla salute e accumuli; Q ripetuta infligge quel bonus e cura.",
+        "style:duel": "Tre accumuli abilitano stordimento/divorare; Q cura e Pelle coriacea converte danno in recupero o scudo."
+      }
     },
     {
       "id": "Taliyah",
@@ -3466,7 +4301,10 @@
       ],
       "tags": [
         "style:poke",
-        "style:zone"
+        "style:burst",
+        "style:sustained",
+        "style:zone",
+        "style:sidelane"
       ],
       "roles": [
         "JUNGLE",
@@ -3474,7 +4312,14 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Taliyah.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "Q lancia rocce a distanza e terreno lavorato consente un masso con recupero ridotto.",
+        "style:burst": "W forza il bersaglio nelle pietre E facendo detonare il campo in scarica specifica.",
+        "style:sustained": "Q arriva a 3 secondi e terreno lavorato riduce ancora il recupero per raffiche ripetute.",
+        "style:zone": "E crea un campo di mine e R modifica il terreno su enorme distanza.",
+        "style:sidelane": "Q/E puliscono e la passiva presso i muri con R abilita ricongiungimento a lunga distanza."
+      }
     },
     {
       "id": "Talon",
@@ -3497,7 +4342,11 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Talon.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:burst": "Tre ferite consumate dall'attacco e convergenza R concentrano combo con sanguinamento successivo.",
+        "style:sidelane": "W attraversa l'ondata e il salto ripetuto su terreni diversi consente uscita e rotazione rapide."
+      }
     },
     {
       "id": "Taric",
@@ -3512,15 +4361,19 @@
         "class:tank"
       ],
       "tags": [
-        "style:engage",
-        "style:peel"
+        "style:peel",
+        "style:sustained"
       ],
       "roles": [
         "SUPPORT"
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Taric.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:peel": "Q cura, W scherma e collega un alleato; R rende invulnerabili gli alleati nell'area dopo il ritardo.",
+        "style:sustained": "Abilità abilita due colpi rapidi la passiva con bonus e riduzione recuperi; colpi ricaricano Q che riavvia ciclo."
+      }
     },
     {
       "id": "Teemo",
@@ -3536,6 +4389,7 @@
       ],
       "tags": [
         "style:poke",
+        "style:sustained",
         "style:zone",
         "style:sidelane"
       ],
@@ -3544,7 +4398,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Teemo.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "Q ripetibile a 680/7 secondi e attacco con veleno E producono pressione caratterizzante da breve colpisci-e-rientra; il danno continua dopo il rientro facilitato da W. Funghi non usati per giustificare poke.",
+        "style:sustained": "Attacchi applicano veleno all'impatto e nel tempo; uscire dall'invisibilità concede velocità.",
+        "style:zone": "R distribuisce funghi persistenti che rallentano e lasciano nubi velenose.",
+        "style:sidelane": "Attacchi velenosi e funghi sostengono corsia e visione; velocità e cecità proteggono la pressione."
+      }
     },
     {
       "id": "Thresh",
@@ -3560,14 +4420,20 @@
       ],
       "tags": [
         "style:engage",
-        "style:peel"
+        "style:peel",
+        "style:zone"
       ],
       "roles": [
         "SUPPORT"
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Thresh.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "Q forza la cattura, mentre E e R impediscono la fuga.",
+        "style:peel": "W offre agli alleati scudo e una via di fuga; E respinge gli aggressori e R rallenta il loro accesso.",
+        "style:zone": "R crea una prigione persistente di pareti che punisce ogni attraversamento."
+      }
     },
     {
       "id": "Tristana",
@@ -3584,6 +4450,7 @@
       "tags": [
         "style:burst",
         "style:sustained",
+        "style:duel",
         "style:sidelane"
       ],
       "roles": [
@@ -3592,7 +4459,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Tristana.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:burst": "Attacchi con Q caricano E; detonazione con W/R produce picco deliberato.",
+        "style:sustained": "Q aumenta velocità e passiva aumenta portata per fuoco dopo la detonazione E.",
+        "style:duel": "Velocità d'attacco e bomba premiano colpi consecutivi; salto e respinta difendono la distanza.",
+        "style:sidelane": "Danno ad area passivo e bomba puliscono/colpiscono strutture; salto e respinta offrono uscita."
+      }
     },
     {
       "id": "Trundle",
@@ -3608,6 +4481,7 @@
       ],
       "tags": [
         "style:sustained",
+        "style:zone",
         "style:duel",
         "style:sidelane"
       ],
@@ -3617,7 +4491,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Trundle.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:sustained": "Q sottrae attacco e W aumenta velocità/recupero sostenendo mischia durante drenaggio R.",
+        "style:zone": "E crea terreno invalicabile e un rallentamento persistente attorno al pilastro.",
+        "style:duel": "Q sottrae attacco, W potenzia attacchi e cure, R sottrae salute e resistenze allo stesso bersaglio.",
+        "style:sidelane": "Q/W potenziano attacchi su unità e strutture; furto di statistiche e pilastro sostengono il duello."
+      }
     },
     {
       "id": "Tryndamere",
@@ -3641,7 +4521,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Tryndamere.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:sustained": "Attacchi generano furia/critico; attacco cresce a salute bassa e R prolunga tempo offensivo.",
+        "style:duel": "Furia, cura, scatto e invulnerabilità alimentano attacchi prolungati a poca vita.",
+        "style:sidelane": "Attacchi e scatto puliscono e pressano; cura, mobilità e invulnerabilità consentono pressione profonda."
+      }
     },
     {
       "id": "TwistedFate",
@@ -3656,7 +4541,10 @@
         "class:marksman"
       ],
       "tags": [
+        "style:engage",
+        "style:poke",
         "style:burst",
+        "style:sustained",
         "style:sidelane"
       ],
       "roles": [
@@ -3664,7 +4552,14 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/TwistedFate.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "R più Gate dà accesso globale e la carta oro applica un controllo mirato affidabile.",
+        "style:poke": "Q attraversa le unità e proietta tre carte offensive a distanza prima della cattura.",
+        "style:burst": "Carta preparata, Q e colpo E concentrano scarica sulla cattura.",
+        "style:sustained": "E concede velocità e bonus ogni quattro attacchi: componente nativa senza build AD rara.",
+        "style:sidelane": "Carte e Q puliscono; R/Gate ricongiunge globalmente dopo la spinta."
+      }
     },
     {
       "id": "Twitch",
@@ -3687,7 +4582,11 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Twitch.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:burst": "Veleno accumulabile rapidamente e consumabile con E produce un picco; richiede quella finestra.",
+        "style:sustained": "Attacchi accumulano veleno persistente e Q/R aumentano cadenza/portata/penetrazione."
+      }
     },
     {
       "id": "Udyr",
@@ -3702,8 +4601,11 @@
         "class:tank"
       ],
       "tags": [
+        "style:burst",
         "style:sustained",
-        "style:duel"
+        "style:zone",
+        "style:duel",
+        "style:sidelane"
       ],
       "roles": [
         "TOP",
@@ -3711,7 +4613,14 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Udyr.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:burst": "Q risvegliata concentra fulmini sui prossimi due attacchi; condizionato alla scelta di risveglio.",
+        "style:sustained": "Posture abilitano attacchi rapidi; Q potenzia colpi ripetuti e R mantiene tempesta dannosa.",
+        "style:zone": "R è un campo glaciale frequente che può restare su Udyr o essere liberato per inseguire.",
+        "style:duel": "Le pose alternano attacchi potenziati, scudo/cura, inseguimento e immunità ai controlli.",
+        "style:sidelane": "Le pose offrono area, attacchi rapidi, cura/scudo e velocità con immunità per pressione ed uscita."
+      }
     },
     {
       "id": "Urgot",
@@ -3727,14 +4636,20 @@
       ],
       "tags": [
         "style:sustained",
-        "style:duel"
+        "style:duel",
+        "style:sidelane"
       ],
       "roles": [
         "TOP"
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Urgot.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:sustained": "W spara continuamente e attiva esplosioni periodiche delle gambe.",
+        "style:duel": "W e gambe producono fuoco continuato; scudo, rallentamento e presa sostengono il focus.",
+        "style:sidelane": "W e gambe puliscono e pressano; scudo, controllo e duello rendono costoso affrontarlo solo."
+      }
     },
     {
       "id": "Varus",
@@ -3751,14 +4666,23 @@
       "tags": [
         "style:engage",
         "style:poke",
-        "style:sustained"
+        "style:burst",
+        "style:sustained",
+        "style:zone"
       ],
       "roles": [
         "BOTTOM"
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Varus.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "R immobilizza il primo bersaglio e propaga la minaccia ai compagni vicini.",
+        "style:poke": "Q caricata aumenta gittata e danno, sostenendo pressione prima dell'impegno.",
+        "style:burst": "Abilità detonano Blight sulla salute massima e W potenzia Q: picco nativo, senza build AP obbligatoria.",
+        "style:sustained": "Attacchi applicano magico e accumuli Blight ripetibili detonabili dalle abilità.",
+        "style:zone": "E profana il terreno, mantenendo rallentamento e riduzione delle cure."
+      }
     },
     {
       "id": "Vayne",
@@ -3782,7 +4706,11 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Vayne.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:sustained": "Ogni terzo colpo infligge vero percentuale e R riduce recupero della mobilità Q.",
+        "style:duel": "Tre colpi sullo stesso bersaglio, capriola, respinta/stordimento e invisibilità sono un kit da duello."
+      }
     },
     {
       "id": "Veigar",
@@ -3796,6 +4724,7 @@
         "class:mage"
       ],
       "tags": [
+        "style:poke",
         "style:burst",
         "style:zone"
       ],
@@ -3805,7 +4734,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Veigar.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "Q attraversa due bersagli e W minaccia un'area a distanza, distinta dall'esecuzione R.",
+        "style:burst": "Q/W preparano R che cresce sulla salute mancante: minaccia concentrata di esecuzione.",
+        "style:zone": "E mantiene una gabbia ampia le cui pareti stordiscono chi tenta di attraversarle."
+      }
     },
     {
       "id": "Velkoz",
@@ -3829,7 +4763,11 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Velkoz.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "Q si divide e W apre fenditure a distanza prima della combo.",
+        "style:burst": "Terza applicazione passiva esplode in vero e breve R concentra danno sui ricercati."
+      }
     },
     {
       "id": "Vex",
@@ -3844,6 +4782,7 @@
       ],
       "tags": [
         "style:engage",
+        "style:poke",
         "style:burst"
       ],
       "roles": [
@@ -3851,7 +4790,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Vex.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "R dà l'ingresso a lunga distanza e Doom può trasformare l'arrivo in paura ad area.",
+        "style:poke": "Q lunga ed E ad area consentono pressione ripetuta prima dell'ingresso R.",
+        "style:burst": "R con ricast permette di concentrare Q/E/W e danno sui marchi Gloom."
+      }
     },
     {
       "id": "Vi",
@@ -3867,14 +4811,20 @@
       ],
       "tags": [
         "style:engage",
-        "style:burst"
+        "style:burst",
+        "style:duel"
       ],
       "roles": [
         "JUNGLE"
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Vi.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "R raggiunge e blocca un bersaglio selezionato, respingendo chi è sul percorso.",
+        "style:burst": "Q/R concentrano colpi E e detonazione dei tre colpi W nell'apertura.",
+        "style:duel": "Tre colpi riducono armatura e danno velocità; abilità rinnovano lo scudo e mantengono l'ingaggio."
+      }
     },
     {
       "id": "Viego",
@@ -3890,14 +4840,20 @@
       ],
       "tags": [
         "style:sustained",
-        "style:duel"
+        "style:duel",
+        "style:sidelane"
       ],
       "roles": [
         "JUNGLE"
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Viego.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:sustained": "Q aggiunge percentuale/doppio colpo dopo abilità con velocità d'attacco da E.",
+        "style:duel": "Danno e cura sugli attacchi dopo un'abilità, velocità nella nebbia e R di riposizionamento.",
+        "style:sidelane": "Q e attacchi puliscono; duello, camuffamento e velocità lungo terreno sostengono pressione ed uscita."
+      }
     },
     {
       "id": "Viktor",
@@ -3912,6 +4868,7 @@
       ],
       "tags": [
         "style:poke",
+        "style:burst",
         "style:sustained",
         "style:zone"
       ],
@@ -3920,7 +4877,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Viktor.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "E taglia una linea a distanza e, aumentata, aggiunge esplosione successiva.",
+        "style:burst": "Q/attacco potenziato, E aumentata e danno iniziale R concentrano scarica accanto alla tempesta.",
+        "style:sustained": "R persiste periodicamente e si riposiziona mentre Q/E tornano nei cicli successivi.",
+        "style:zone": "W persiste fino allo stordimento e R resta attiva e riposizionabile."
+      }
     },
     {
       "id": "Vladimir",
@@ -3936,7 +4899,9 @@
       ],
       "tags": [
         "style:burst",
-        "style:sustained"
+        "style:sustained",
+        "style:duel",
+        "style:sidelane"
       ],
       "roles": [
         "TOP",
@@ -3944,7 +4909,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Vladimir.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:burst": "Q potenziata ed E caricata concentrano picco amplificato dalla successiva R.",
+        "style:sustained": "Q recupera salute e danno mentre la risorsa prepara Q potenziate e nuovi cicli E.",
+        "style:duel": "Q cura ciclicamente, W rende intargettabile ed E/R convertono salute e danno in recupero.",
+        "style:sidelane": "E/Q gestiscono e curano; velocità e intargettabilità di W danno autonomia e uscita locale."
+      }
     },
     {
       "id": "Volibear",
@@ -3961,7 +4932,8 @@
       "tags": [
         "style:engage",
         "style:sustained",
-        "style:duel"
+        "style:duel",
+        "style:sidelane"
       ],
       "roles": [
         "TOP",
@@ -3969,7 +4941,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Volibear.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "R supera il fronte e Q applica lo stordimento mirato all'arrivo.",
+        "style:sustained": "Attacchi/abilità accumulano velocità/fulmini; W ripetuta aumenta danno/cura sul bersaglio.",
+        "style:duel": "Attacchi/abilità accumulano velocità, la seconda W cura e E offre scudo e rallentamento.",
+        "style:sidelane": "Passiva pulisce, attacchi e Q pressano; cure/scudo e R con salto sostengono duello ed uscita."
+      }
     },
     {
       "id": "Warwick",
@@ -3994,7 +4972,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Warwick.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "R è un salto a lunga gittata con soppressione del primo campione colpito.",
+        "style:sustained": "Attacchi hanno bonus e recupero; W aumenta fortemente cadenza sui nemici feriti.",
+        "style:duel": "Cure crescenti a poca vita, morso sulla salute massima, velocità e riduzione danni sostengono l'inseguimento."
+      }
     },
     {
       "id": "Xayah",
@@ -4008,15 +4991,23 @@
         "class:marksman"
       ],
       "tags": [
+        "style:burst",
         "style:sustained",
-        "style:zone"
+        "style:zone",
+        "style:duel"
       ],
       "roles": [
         "BOTTOM"
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Xayah.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:burst": "E richiama insieme piume da Q/attacchi/R concentrando danno e root in un rilascio.",
+        "style:sustained": "W aumenta velocità/danno e attacchi dopo abilità lasciano piume per altri cicli.",
+        "style:zone": "Le piume restano sul terreno e formano linee di minaccia ripetibili con E.",
+        "style:duel": "Attacchi potenziati accumulano piume; velocità, radice e intargettabilità proteggono il danno continuato."
+      }
     },
     {
       "id": "Xerath",
@@ -4040,7 +5031,11 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Xerath.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "Q caricabile e W ad area sono artiglieria ripetibile a distanza.",
+        "style:burst": "Stordimento E prepara Q/W e colpi R in una scarica senza ingresso."
+      }
     },
     {
       "id": "XinZhao",
@@ -4064,7 +5059,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/XinZhao.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "W marca da lunga distanza per estendere E; R respinge subito gli altri bersagli e Q aggiunge il lancio in aria preparabile.",
+        "style:sustained": "Ogni terzo colpo dà bonus/cura; E aumenta velocità e Q potenzia tre colpi.",
+        "style:duel": "Terzo colpo cura e solleva, E aggiunge velocità d'attacco e R isola dal danno esterno."
+      }
     },
     {
       "id": "Yasuo",
@@ -4090,7 +5090,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Yasuo.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:sustained": "Q si comporta da attacco e si ripete con la cadenza del kit e critici potenziati.",
+        "style:duel": "Q accumulabile, scatti reiterati, scudo da movimento e muro sostengono gli scambi ripetuti.",
+        "style:sidelane": "Q e scatti sull'ondata puliscono rapidamente; scudo e muro sostengono duello e fuga lungo le unità."
+      }
     },
     {
       "id": "Yone",
@@ -4105,6 +5110,7 @@
         "class:assassin"
       ],
       "tags": [
+        "style:engage",
         "style:burst",
         "style:sustained",
         "style:duel",
@@ -4116,7 +5122,14 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Yone.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "R attraversa il fronte e trascina tutti i campioni colpiti verso il punto d'arrivo.",
+        "style:burst": "Finestra E registra danno e ne ripete parte al rientro, combinandosi con Q/W/R.",
+        "style:sustained": "Attacchi alternati applicano misto e velocità accelera abilità/cast mantenendo cicli.",
+        "style:duel": "Q accumulabile, scudo scalabile, attacchi misti ed E ripetono parte del danno con ritorno sicuro.",
+        "style:sidelane": "Q/W puliscono, mentre E garantisce ritorno al punto di partenza e R attraversa gli avversari."
+      }
     },
     {
       "id": "Yorick",
@@ -4131,6 +5144,7 @@
         "class:tank"
       ],
       "tags": [
+        "style:poke",
         "style:sustained",
         "style:zone",
         "style:sidelane"
@@ -4140,7 +5154,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Yorick.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "E proietta il marchio e indirizza Mist Walker senza ingresso personale; richiede evocazioni disponibili.",
+        "style:sustained": "Mist Walker/Maiden persistono e attaccano; Maiden potenzia anche attacchi Yorick.",
+        "style:zone": "Dark Process crea una parete distruttibile, mentre Maiden e Mist Walkers mantengono pressione nello spazio.",
+        "style:sidelane": "Ghoul e Maiden spingono autonomamente; muro, cura e danno sul bersaglio difendono la pressione."
+      }
     },
     {
       "id": "Yunara",
@@ -4154,6 +5174,7 @@
         "class:marksman"
       ],
       "tags": [
+        "style:poke",
         "style:sustained"
       ],
       "roles": [
@@ -4161,7 +5182,11 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Yunara.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "W proietta una sfera fino a 1150 e in trasformazione diventa laser: pressione anche nella forma base.",
+        "style:sustained": "Q aggiunge velocità/danno sul colpo/propagazione; attaccare alimenta la risorsa."
+      }
     },
     {
       "id": "Yuumi",
@@ -4176,14 +5201,19 @@
         "class:mage"
       ],
       "tags": [
-        "style:peel"
+        "style:peel",
+        "style:poke"
       ],
       "roles": [
         "SUPPORT"
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Yuumi.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:peel": "E scherma il compagno e ne agevola il movimento; Q/R e la passiva sostengono cure e controllo durante la protezione.",
+        "style:poke": "Q guidabile mentre è agganciata infligge danno potenziato dopo il tratto iniziale e si ripete prima dello scontro."
+      }
     },
     {
       "id": "Zaahen",
@@ -4209,7 +5239,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Zaahen.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "W forza uno spostamento lineare da distanza significativa; E dà accesso e la seconda attivazione di Q aggiunge il lancio in aria.",
+        "style:sustained": "Attacchi/abilità accumulano Determination con attacco bonus; Q offre colpi/cura per proseguire.",
+        "style:duel": "Determinazione cresce sui campioni, Q cura e ricasta, scatto e R curativa sostengono il protrarsi.",
+        "style:sidelane": "Abilità ad area puliscono; cure, scatto, Determinazione e resurrezione sostengono il duello laterale."
+      }
     },
     {
       "id": "Zac",
@@ -4224,7 +5260,8 @@
         "class:fighter"
       ],
       "tags": [
-        "style:engage"
+        "style:engage",
+        "style:sustained"
       ],
       "roles": [
         "TOP",
@@ -4233,7 +5270,11 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Zac.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:engage": "E offre accesso da enorme distanza e controllo ad area all'atterraggio.",
+        "style:sustained": "W recupera in 5 secondi e ogni globulo raccolto riduce di un secondo: circuito di percentuale ripetuta."
+      }
     },
     {
       "id": "Zed",
@@ -4247,8 +5288,8 @@
         "class:assassin"
       ],
       "tags": [
+        "style:poke",
         "style:burst",
-        "style:duel",
         "style:sidelane"
       ],
       "roles": [
@@ -4257,7 +5298,12 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Zed.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "Q propria e delle ombre proietta danno; W consente pressione senza impegnare R.",
+        "style:burst": "Q delle ombre e combo durante R vengono concentrate e ripetute alla detonazione.",
+        "style:sidelane": "Q/E con ombre puliscono e lo scambio di posizione offre uscita dopo la spinta."
+      }
     },
     {
       "id": "Zeri",
@@ -4271,14 +5317,23 @@
         "class:marksman"
       ],
       "tags": [
-        "style:sustained"
+        "style:poke",
+        "style:sustained",
+        "style:duel",
+        "style:sidelane"
       ],
       "roles": [
         "BOTTOM"
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Zeri.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "W attraverso terreno diventa laser lungo: condizionato a una parete, distinto da Q che sostituisce gli attacchi.",
+        "style:sustained": "Q sostituisce attacchi e R sovraccarica il ciclo mantenuto colpendo campioni.",
+        "style:duel": "R accumula velocità a ogni colpo, mentre Q continuata ed E attraverso terreno mantengono spaziatura.",
+        "style:sidelane": "Q gestisce ondata e pressione; R cresce a ogni colpo nel duello ed E attraversa intere pareti come uscita eccezionale."
+      }
     },
     {
       "id": "Ziggs",
@@ -4293,7 +5348,9 @@
       ],
       "tags": [
         "style:poke",
-        "style:zone"
+        "style:burst",
+        "style:zone",
+        "style:sidelane"
       ],
       "roles": [
         "MIDDLE",
@@ -4301,7 +5358,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Ziggs.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "Q lancia bombe ripetibili a distanza, con E/R che estendono la minaccia.",
+        "style:burst": "Bomba R e Q concentrano un forte colpo ad area su trattenuti, distinto dal tiro ripetuto.",
+        "style:zone": "E dissemina mine persistenti che rallentano e chiudono i passaggi.",
+        "style:sidelane": "Danno ad area pulisce, passiva e Satchel danneggiano/eseguono torri e Satchel offre distacco."
+      }
     },
     {
       "id": "Zilean",
@@ -4317,6 +5380,8 @@
       ],
       "tags": [
         "style:peel",
+        "style:poke",
+        "style:burst",
         "style:zone"
       ],
       "roles": [
@@ -4325,7 +5390,13 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Zilean.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:peel": "R può salvare un alleato da un danno letale; E accelera la fuga o rallenta l'inseguitore e doppia Q lo stordisce.",
+        "style:poke": "Q proietta bombe a distanza e W riduce il recupero per ripetere la pressione.",
+        "style:burst": "Q-W-Q detona subito la prima bomba, stordisce e prepara seconda detonazione: doppio danno specifico.",
+        "style:zone": "Q resta per tre secondi e W permette di sovrapporre rapidamente una seconda zona con stordimento."
+      }
     },
     {
       "id": "Zoe",
@@ -4347,7 +5418,11 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Zoe.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "Q guadagna danno dalla distanza e R ne estende la proiezione con ritorno automatico.",
+        "style:burst": "Q crescente con distanza ed E che amplifica il risveglio concentrano minaccia in colpo preparato."
+      }
     },
     {
       "id": "Zyra",
@@ -4363,6 +5438,8 @@
       ],
       "tags": [
         "style:poke",
+        "style:burst",
+        "style:sustained",
         "style:zone"
       ],
       "roles": [
@@ -4372,7 +5449,28 @@
       ],
       "sources": [
         "https://ddragon.leagueoflegends.com/cdn/16.13.1/data/en_US/champion/Zyra.json"
-      ]
+      ],
+      "tag_reasons": {
+        "style:poke": "Q e piante create a distanza proiettano danno ripetuto prima di un ingresso.",
+        "style:burst": "E trattiene per Q/impatti R concentrando combo ad area oltre al danno delle piante.",
+        "style:sustained": "Piante attaccano per la durata e R ne rinnova durata e aumenta danno.",
+        "style:zone": "Semi e piante persistono, proiettano attacchi e rallentamenti e costruiscono aree difese."
+      }
     }
-  ]
+  ],
+  "audit": {
+    "reviewed_at": "2026-10-02",
+    "baseline_version": "1.1.0",
+    "reviewed_champions": 173,
+    "reviewed_categories": [
+      "style:engage",
+      "style:zone",
+      "style:poke",
+      "style:burst",
+      "style:sustained",
+      "style:duel",
+      "style:sidelane"
+    ],
+    "basis": "Descrizioni e tooltip ufficiali Data Dragon 16.13.1; decisioni curatorie indipendenti dalle partite."
+  }
 }

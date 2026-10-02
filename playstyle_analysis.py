@@ -167,16 +167,20 @@ def contrast(rows, candidate, accounts, family_size, settings=None):
     }
 
 
-def composition(rows):
+def composition(rows, category_id=None):
     groups = defaultdict(list)
     for row in rows:
         groups[row["champion"]].append(row)
     result = []
     for champion, group in groups.items():
         entry = champion_entry(champion)
-        result.append({"champion": champion, "name": entry["name"] if entry else champion,
-                       "games": len({r["match_id"] for r in group}), "wins": sum(bool(r["win"]) for r in group),
-                       "losses": sum(not r["win"] for r in group)})
+        item = {"champion": champion, "name": entry["name"] if entry else champion,
+                "games": len({r["match_id"] for r in group}), "wins": sum(bool(r["win"]) for r in group),
+                "losses": sum(not r["win"] for r in group)}
+        reason = entry.get("tag_reasons", {}).get(category_id) if entry else None
+        if reason:
+            item["reason"] = reason
+        result.append(item)
     return sorted(result, key=lambda x: (-x["games"], x["champion"]))
 
 
@@ -188,7 +192,7 @@ def rank_categories(rows, accounts):
     result = []
     for definition in definitions:
         candidate = [row for row in known if definition["id"] in champion_categories(row["champion"])]
-        item = {**definition, **contrast(known, candidate, accounts, len(definitions), settings), "composition": composition(candidate)}
+        item = {**definition, **contrast(known, candidate, accounts, len(definitions), settings), "composition": composition(candidate, definition["id"])}
         dominant = item["composition"][0]["champion"] if candidate else None
         dominant_ids = {row["match_id"] for row in candidate if row["champion"] == dominant}
         remaining = [row for row in known if row["match_id"] not in dominant_ids]

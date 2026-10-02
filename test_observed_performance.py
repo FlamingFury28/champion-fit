@@ -113,6 +113,22 @@ def test_unobserved_and_incomparable_accounts_are_explicit_and_block_support():
     assert result["per_account"]["C"]["baseline_win_rate"] is None
     assert result["supported"] is False
     assert result["direction"] == "better"
+    assert result["decision_candidate_low"] is None
+    assert result["decision_baseline_high"] is None
+
+
+def test_paired_candidate_summary_uses_the_same_accounts_as_the_baseline():
+    candidate = observations("A", "candidate-a", [1]) + observations("C", "candidate-c", [0])
+    baseline = observations("A", "base-a", [0]) + observations("B", "base-b", [1])
+
+    result = observed_performance(candidate + baseline, candidate, ["A", "B", "C"])
+
+    assert result["win_rate"] == 50
+    assert result["paired_candidate_win_rate"] == 100
+    assert result["baseline_win_rate"] == 0
+    assert result["lift_pp"] == 100
+    assert result["paired_candidate_low"] == pytest.approx(result["per_account"]["A"]["interval_low"])
+    assert result["paired_candidate_high"] == pytest.approx(result["per_account"]["A"]["interval_high"])
 
 
 def test_clear_raw_difference_can_be_supported_without_a_minimum_games_gate():
@@ -134,6 +150,15 @@ def test_family_size_only_tightens_the_support_decision_not_descriptive_interval
     )
     assert one["supported"] is True
     assert many["supported"] is False
+    assert one["family_size"] == 1
+    assert many["family_size"] == 40
+    assert one["family_alpha"] == many["family_alpha"] == 0.05
+    assert one["meaningful_delta"] == many["meaningful_delta"] == 0.03
+    assert one["meaningful_delta_pp"] == many["meaningful_delta_pp"] == 3
+    assert one["decision_side_alpha"] == pytest.approx(0.025)
+    assert many["decision_side_alpha"] == pytest.approx(0.000625)
+    assert one["decision_candidate_low"] > one["decision_baseline_high"] + 3
+    assert many["decision_candidate_low"] <= many["decision_baseline_high"] + 3
 
 
 def test_family_alpha_is_independent_from_descriptive_confidence():

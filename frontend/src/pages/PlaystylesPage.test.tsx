@@ -22,10 +22,10 @@ function fixture(): PlaystylesResponse {
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); context.scope.accounts = ['Alpha#EUW'] })
 
-function renderPage(url = '/app/playstyles', seeded = true) {
+function renderPage(url = '/app/playstyles', seeded = true, data = fixture()) {
   vi.stubGlobal('fetch', vi.fn(() => new Promise(() => undefined)))
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity, gcTime: Infinity } } })
-  if (seeded) client.setQueryData(playstyleQueryKeys.overview(context.scope, { days: '180', role: 'ALL', queue: '420', category: undefined }), fixture())
+  if (seeded) client.setQueryData(playstyleQueryKeys.overview(context.scope, { days: '180', role: 'ALL', queue: '420', category: undefined }), data)
   const element = <QueryClientProvider client={client}><MemoryRouter initialEntries={[url]}><PlaystylesPage /></MemoryRouter></QueryClientProvider>
   const rendered = render(element)
   return { client, element, ...rendered }
@@ -58,6 +58,19 @@ describe('pagina stili', () => {
     expect(screen.getByText('Riferimento non disponibile nel contesto selezionato.')).toBeInTheDocument()
     expect(screen.queryByText(/Quota media del prior/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/intervallo binomiale al 90% 35–72%/i)).not.toBeInTheDocument()
+  })
+
+  it('mostra la motivazione del tag nei dettagli del campione', async () => {
+    const data = fixture()
+    const reason = 'La sfera controlla lo spazio con danno ripetibile e minaccia di spostamento.'
+    data.categories = data.categories.map((category) => ({ ...category,
+      composition: category.composition.map((champion) => ({ ...champion, reason })),
+    }))
+    renderPage('/app/playstyles', true, data)
+    expect(screen.queryByText(reason)).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Perché Maghi?' }))
+    expect(screen.getByText(reason)).toBeInTheDocument()
+    expect(screen.getByText('10 partite · 6V / 4S')).toBeInTheDocument()
   })
 
   it('preserva le scelte esplicite anche mentre il nuovo filtro non ha risposta', async () => {

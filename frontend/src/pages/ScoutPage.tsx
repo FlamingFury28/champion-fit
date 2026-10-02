@@ -23,7 +23,8 @@ export function ScoutPage({ embedded = false }: { embedded?: boolean }) {
   const result = useQuery({ ...recommendationsQuery(scope, { role: explicitRole, queue: params.get('queue') ?? undefined, days: params.get('days') ?? undefined }), enabled: scopeReady })
   const data = result.data
   const suspendedAccounts = Array.isArray(data?.context.suspended_accounts) ? data.context.suspended_accounts.map(String) : []
-  const feedbackAccounts = data?.coverage.selected_accounts.filter((account) => !suspendedAccounts.includes(account)) ?? []
+  const unresolvedAccounts = Array.isArray(data?.context.unresolved_accounts) ? data.context.unresolved_accounts.map(String) : []
+  const feedbackAccounts = data?.coverage.selected_accounts.filter((account) => !suspendedAccounts.includes(account) && !unresolvedAccounts.includes(account)) ?? []
   const allowAllAccountsShortcut = scope.accounts.length === 0 && feedbackAccounts.length === (data?.coverage.selected_accounts.length ?? 0)
   const update = (key: string, value: string) => setParams((current) => { const next = new URLSearchParams(current); if (key === 'tag') next.delete('category'); if (!value || value === 'ALL' || value === '0') next.delete(key); else next.set(key, value); return next }, { replace: true })
   const sourceTags = useMemo(() => [...new Set((data?.discover ?? []).flatMap((item) => item.source_champions.flatMap((source) => source.matched_tags)))].slice(0, 30), [data])

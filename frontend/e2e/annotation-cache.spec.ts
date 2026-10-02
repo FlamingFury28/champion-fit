@@ -83,6 +83,7 @@ test('Audit aggiorna la Synergy già in cache senza ricaricare la pagina', async
   // Client-side navigation must retain the QueryClient while refreshing the
   // invalidated result. Reloading here would erase the cache and miss the bug.
   await page.getByRole('link', { name: 'Campioni', exact: true }).click()
+  await page.getByText(/^Altri strumenti/).click()
   await page.getByRole('link', { name: 'Avversari e alleati', exact: true }).click()
   await page.getByRole('link', { name: 'Campioni alleati', exact: true }).click()
   await expect(page.getByText('+15 pp', { exact: true })).toBeVisible()

@@ -14,9 +14,8 @@ import { TestPlanPage } from './TestPlanPage'
 const sections = [
   { id: 'best', label: 'Quali giochi meglio?' },
   { id: 'tournament', label: 'Piano da 400 partite' },
-  { id: 'matchups', label: 'Avversari e alleati' },
 ] as const
-const supportedSections = ['choices', ...sections.map((item) => item.id), 'training']
+const supportedSections = [...sections.map((item) => item.id), 'matchups', 'choices', 'training']
 
 export function ChampionsHubPage() {
   const [params, setParams] = useSearchParams()
@@ -33,7 +32,7 @@ export function ChampionsHubPage() {
   }
   const allies = params.get('relation') === 'allies'
   const plan = params.get('training') === 'plan'
-  const secondarySection = section === 'choices' || section === 'training'
+  const secondarySection = section === 'matchups' || section === 'choices' || section === 'training'
   const secondaryHref = (nextSection: string, trainingMode?: string) => {
     const next = new URLSearchParams(params)
     next.set('section', nextSection)
@@ -46,10 +45,14 @@ export function ChampionsHubPage() {
   if (redirect) return <Navigate to={redirect} replace />
 
   return <div className="page-stack workspace-hub">
-    <PageHeader eyebrow="Il tuo spazio / Campioni" title="Campioni" copy="Confronta il rendimento storico e prepara il piano competitivo. Preferenze personali e prove facoltative restano in una sezione separata." />
+    <PageHeader eyebrow="Il tuo spazio / Campioni" title="Campioni" copy="Confronta il rendimento storico e distribuisci le partite del piano competitivo." />
     <SectionNavigation path="/app/fit" active={section} label="Sezioni campioni" items={sections} />
     <details className="hub-secondary" open={secondarySection}>
-      <summary>Preferenze e scoperte <span>Facoltative</span></summary>
+      <summary>Altri strumenti <span>Confronti, preferenze e prove</span></summary>
+      <nav className="hub-secondary__links" aria-label="Confronti aggiuntivi">
+        <Link to={secondaryHref('matchups')} aria-current={section === 'matchups' ? 'page' : undefined}>Avversari e alleati</Link>
+      </nav>
+      <p className="hub-secondary__label">Preferenze e scoperte · Facoltative</p>
       <nav className="hub-secondary__links" aria-label="Preferenze e scoperte facoltative">
         <Link to={secondaryHref('choices')} aria-current={section === 'choices' ? 'page' : undefined}>Familiari e preferiti</Link>
         <Link to={secondaryHref('training', 'discover')} aria-current={section === 'training' && !plan ? 'page' : undefined}>Scopri candidati</Link>
@@ -65,13 +68,7 @@ export function ChampionsHubPage() {
         <Link to={link('relation', 'allies')} aria-current={allies ? 'page' : undefined}>Campioni alleati</Link>
       </nav>
       {allies ? <SynergyPage embedded /> : <ChampionsPage embedded />}
-    </> : <>
-      <nav className="context-navigation" aria-label="Esplorazione e prove">
-        <Link to={link('training', 'discover')} aria-current={!plan ? 'page' : undefined}>Scopri candidati</Link>
-        <Link to={link('training', 'plan')} aria-current={plan ? 'page' : undefined}>Piano di prove</Link>
-      </nav>
-      {plan ? <TestPlanPage embedded /> : <ScoutPage embedded />}
-    </>}
+    </> : plan ? <TestPlanPage embedded /> : <ScoutPage embedded />}
     <Drawer wide open={Boolean(champion)} title={champion ? `Scheda di ${champion}` : 'Scheda campione'} description="Risultati, consiglio e confronti. Chiudi la scheda per tornare alla lista con gli stessi filtri." onOpenChange={(open) => {
       if (!open) {
         if (location.state?.championSheetFromList) navigate(-1)

@@ -8,7 +8,7 @@ export interface PlaystyleCategoryDefinition {
   id: string; label: string; kind: string; criteria: string | string[]; roles: string[]; sources: PlaystyleSource[]
 }
 export interface PlaystyleSupport { games: number; baseline_games: number; local_missing?: boolean }
-export interface PlaystyleComposition { champion: string; name: string; games: number; wins: number; losses: number }
+export interface PlaystyleComposition { champion: string; name: string; games: number; wins: number; losses: number; reason?: string }
 export interface PlaystyleCategory extends PlaystyleCategoryDefinition {
   games: number; observations: number; wins: number; losses: number
   mean: number | null; lower?: number | null; upper?: number | null; lower_90?: number | null; upper_90?: number | null

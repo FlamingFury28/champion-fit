@@ -13,7 +13,7 @@ import unicodedata
 from typing import Any
 
 from account_identity import canonical_account_name
-from champion_taxonomy import canonical_champion, champion_entry
+from champion_taxonomy import canonical_champion, champion_entry, load_catalog
 
 
 ROLES = {"TOP", "JUNGLE", "MIDDLE", "BOTTOM", "SUPPORT"}
@@ -71,8 +71,30 @@ def _validated_accounts(accounts: object) -> list[str]:
 
 def _all_scoped_accounts(connection: Any) -> list[str]:
     return [str(_row_value(row, "account", 0)) for row in connection.execute(
-        "SELECT DISTINCT account FROM match_quality ORDER BY account"
+        "SELECT account FROM match_quality UNION SELECT account FROM tracked_account_puuids "
+        "UNION SELECT account FROM riot_account_identities ORDER BY account"
     ) if _row_value(row, "account", 0)]
+
+
+def all_scoped_accounts(connection: Any) -> list[str]:
+    """Canonical population, deduplicated by identity, including zero-game accounts.
+
+    This is a population, not a list of stored fact labels. A fact reader must
+    resolve historical labels separately before applying the population filter.
+    Ambiguous aliases cannot add or merge an identity.
+    """
+    return resolved_scoped_accounts(connection, _all_scoped_accounts(connection))
+
+
+def resolved_scoped_accounts(connection: Any, accounts: list[str]) -> list[str]:
+    """Known canonical identities only; ambiguous/unknown requests yield no facts.
+
+    Callers retain unresolved requested labels separately for missing coverage.
+    Empty input resolves to the full known pool, matching the account selector.
+    """
+    return sorted({item["canonical"] for item in _resolved_accounts(
+        connection, accounts, for_write=False
+    )})
 
 
 def _identity_rows(connection: Any) -> list[dict[str, str]]:
@@ -362,6 +384,12 @@ def _resolved_accounts(connection: Any, accounts: object, *, for_write: bool) ->
     return resolved
 
 
+def _fact_owner_key(connection: Any, account: object) -> str | None:
+    """Resolve one stored fact label only when it has a single safe owner."""
+    resolved = _resolve_account(connection, str(account or ""), for_write=False)
+    return str(resolved["identity_key"]) if resolved is not None else None
+
+
 def _assert_not_suspended(connection: Any, resolved: list[dict[str, Any]]) -> None:
     identities = sorted({
         identity_id for item in resolved for identity_id in item.get("identity_ids", ())
@@ -454,6 +482,84 @@ def read_feedback(connection: Any, accounts: list[str]) -> dict[str, Any]:
     return _snapshot(connection, accounts)
 
 
+def feedback_library(connection: Any, accounts: list[str]) -> dict[str, Any]:
+    """Return the complete preference ledger and outcome-independent choices.
+
+    Preferences belong to account/champion/role, independently of the current
+    match filters. A first preference therefore needs no played match. Unknown
+    observed champions are offered only in roles observed by every target;
+    saved unknown labels remain in the ledger so they can always be reset.
+    """
+    requested = _validated_accounts(accounts) or _all_scoped_accounts(connection)
+    resolved = _resolved_accounts(connection, requested, for_write=False)
+    suspended = _suspended_identity_ids(connection)
+    active = [item for item in resolved if not (item["identity_ids"] & suspended)]
+    snapshot = read_feedback(connection, requested)
+    catalog = load_catalog()
+    active_accounts = [item["canonical"] for item in active]
+    options = {
+        entry["id"]: {
+            "champion": entry["id"], "name": entry["name"],
+            "roles": sorted(set(entry.get("roles", [])) & ROLES),
+            "roles_by_account": {
+                account: sorted(set(entry.get("roles", [])) & ROLES)
+                for account in active_accounts
+            },
+            "icon_url": f"https://ddragon.leagueoflegends.com/cdn/{catalog['source_version']}/img/champion/{entry['id']}.png",
+            "classified": True,
+        }
+        for entry in catalog["champions"]
+    }
+    # Compact facts only: neither JSON payloads nor outcomes inform choices.
+    if active:
+        active_owner_keys = {str(item["identity_key"]) for item in active}
+        rows = list(connection.execute(
+            "SELECT DISTINCT account,champion,role FROM match_quality"
+        ))
+        fact_accounts = {
+            str(_row_value(row, "account", 0)) for row in rows
+        }
+        fact_owners = {
+            account: _fact_owner_key(connection, account)
+            for account in fact_accounts
+        }
+        observed_roles: dict[str, dict[str, set[str]]] = {}
+        for row in rows:
+            owner = fact_owners[str(_row_value(row, "account", 0))]
+            if owner not in active_owner_keys:
+                continue
+            champion = canonical_champion(_row_value(row, "champion", 1))
+            role = str(_row_value(row, "role", 2)).strip().upper()
+            role = {"UTILITY": "SUPPORT", "MID": "MIDDLE", "ADC": "BOTTOM"}.get(role, role)
+            if role not in ROLES or champion in options or not champion:
+                continue
+            observed_roles.setdefault(champion, {}).setdefault(owner, set()).add(role)
+        for champion, owners in observed_roles.items():
+            roles_by_account = {
+                str(account["canonical"]): sorted(
+                    owners.get(str(account["identity_key"]), set())
+                )
+                for account in active
+            }
+            local_roles = [set(roles_by_account[account]) for account in active_accounts]
+            shared_roles = set.intersection(*local_roles)
+            options[champion] = {
+                "champion": champion, "name": champion,
+                "roles": sorted(shared_roles),
+                "roles_by_account": roles_by_account,
+                "icon_url": None, "classified": False,
+            }
+    return {
+        **snapshot,
+        "accounts": active_accounts,
+        "suspended_accounts": [item["canonical"] for item in resolved if item not in active],
+        "unresolved_accounts": [account for account in requested
+                                if _resolve_account(connection, account, for_write=False) is None],
+        "options": sorted(options.values(), key=lambda item: (item["name"].casefold(), item["champion"])),
+        "catalog_version": catalog["version"],
+    }
+
+
 def _has_active_transaction(connection: Any) -> bool:
     if isinstance(connection, sqlite3.Connection):
         return connection.in_transaction
@@ -489,10 +595,6 @@ def _champion_key(value: object) -> str:
         character for character in unicodedata.normalize("NFKD", str(value or "")).casefold()
         if character.isalnum()
     )
-
-
-def _row_belongs_to_account(row_account: object, account: dict[str, Any]) -> bool:
-    return _account_key(row_account) in set(account.get("account_keys", ()))
 
 
 def _existing_feedback_rows(
@@ -541,13 +643,23 @@ def _validated_champion(
     all_matches = list(connection.execute(
         "SELECT account,champion,role FROM match_quality"
     ))
+    fact_accounts = {
+        str(_row_value(row, "account", 0)) for row in all_matches
+    }
+    fact_owners = {
+        account: _fact_owner_key(connection, account)
+        for account in fact_accounts
+    }
     observed_for_every_account = True
     for account in accounts:
         local = [
             str(_row_value(row, "champion", 1))
             for row in all_matches
-            if _row_belongs_to_account(_row_value(row, "account", 0), account)
-            and str(_row_value(row, "role", 2)).upper() == role
+            if fact_owners[str(_row_value(row, "account", 0))] == str(account["identity_key"])
+            and {"UTILITY": "SUPPORT", "MID": "MIDDLE", "ADC": "BOTTOM"}.get(
+                str(_row_value(row, "role", 2)).strip().upper(),
+                str(_row_value(row, "role", 2)).strip().upper(),
+            ) == role
             and _champion_key(_row_value(row, "champion", 1)) == requested_key
         ]
         if not local:

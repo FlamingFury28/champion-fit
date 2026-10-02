@@ -19,6 +19,13 @@ nella pagina. Ruoli compatibili e tag sono descrizioni curate, non una stima del
 Gli stili sono non esclusivi. Per «Protezione degli alleati» serve uno strumento
 rilevante e ricorrente di mitigazione, salvataggio, anti-ingaggio o disimpegno:
 uno scudo accessorio isolato o il solo controllo generico da ingaggio/pick non basta.
+La revisione 1.2.0 applica una soglia di significatività anche agli altri sette stili:
+apertura con accesso e controllo, pressione prima dello scontro, danno esplosivo o
+ripetuto strutturale, minaccia persistente sullo spazio, duello ripetibile e pressione
+laterale autosufficiente. Ogni tag ha una motivazione nel campo `tag_reasons`;
+forme ed evoluzioni necessarie sono esplicite. Il dettaglio «Perché…» mostra la
+motivazione pertinente per ciascun campione osservato. Il registro delle decisioni,
+dei delta e dei casi al confine è in `ARCHETYPE_AUDIT.md`.
 `champion_taxonomy.py` risolve ID e alias. Gli sconosciuti sono dichiarati non classificati
 ed esclusi sia dai candidati sia dalle baseline: una classificazione assente non prova
 che il campione sia privo di un'etichetta. Una partita condivisa è completamente

@@ -91,7 +91,6 @@ export function CompetitivePlanPage({ embedded = false }: { embedded?: boolean }
           </tr>
         })}</tbody></DataTable> : <EmptyState title="Nessun candidato nel contesto corrente" description="Non ci sono esiti storici sufficienti per simulare una scelta. Cambia account, ruolo, modalità o periodo." />}
       </QueryResults>
-      <aside className="context-note"><strong>Le preferenze restano separate</strong><p>Questo è un piano di identificazione basato sui risultati binari. Il ciclo breve “Piano di prove” continua a proporre campioni affini ai tuoi gusti, una partita per candidato.</p></aside>
     </> : null}
   </div>
 }

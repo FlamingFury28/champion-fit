@@ -96,8 +96,50 @@ def test_replay_uses_only_each_frozen_prefix_and_disables_current_feedback():
     assert all(max(row["date"] for row in call["rows"]) < rows[event["prefix"]].occurred_at.isoformat()
                for call, event in zip(calls, events))
     assert [event["prefix"] for event in events] == [3, 5, 10, 20]
+    assert [event["target_match_id"] for event in events] == [
+        "EUW1_4", "EUW1_6", "EUW1_11", "EUW1_21",
+    ]
+    assert all(event["target_time"] and event["target_patch"] == "16.1" for event in events)
     assert metadata["contract_errors"] == {}
     assert metadata["performance_disabled_calls"] == 4
+    assert metadata["unique_target_matches"] == 4
+    assert metadata["events_per_account"] == {"identity-1": 4}
+
+
+def test_lifetime_novelty_uses_prior_other_context_without_inventing_familiarity():
+    rows = [
+        observation(1, "Ahri", role="TOP", at=datetime(2026, 1, 1, tzinfo=timezone.utc)),
+        observation(10, "Lux"),
+        observation(11, "Syndra"),
+        observation(12, "Orianna"),
+        observation(13, "Ahri"),
+        observation(20, "Aatrox", role="TOP"),
+    ]
+    calls = []
+
+    events, metadata = replay_preferences(
+        rows, builder=frequency_builder(calls), prefixes=(3,)
+    )
+
+    assert len(events) == 1
+    assert {row["role"] for row in calls[0]["rows"]} == {"MIDDLE"}
+    assert {(row["champion"], row["role"]) for row in calls[0]["lifetime_rows"]} == {
+        ("Ahri", "TOP"), ("Lux", "MIDDLE"), ("Syndra", "MIDDLE"),
+        ("Orianna", "MIDDLE"),
+    }
+    event = events[0]
+    assert event["familiar_in_context"] is False
+    assert event["tried_other_context"] is True
+    assert event["genuinely_novel"] is False
+    assert event["known_hit_3"] is event["discover_hit_3"] is False
+    summary = summarize_events(events)
+    assert summary["target_categories"]["familiar_in_context"] == 0
+    assert summary["target_categories"]["tried_other_context"] == 1
+    assert summary["target_categories"]["genuinely_novel"] == 0
+    unavailable = summary["target_categories"]["tried_other_context_missing_from_output"]
+    assert (unavailable["successes"], unavailable["eligible"], unavailable["rate"]) == (1, 1, 1.0)
+    assert summary["discover"]["coverage_at_3_unseen"]["eligible"] == 0
+    assert metadata["skipped_unseen_catalog_unknown_targets"] == 0
 
 
 def test_account_role_queue_strata_are_replayed_separately_without_cap():
@@ -127,6 +169,29 @@ def test_account_role_queue_strata_are_replayed_separately_without_cap():
         "Player0#EUW", "Player1#EUW", "Player2#EUW"
     }
     assert all({row["queue"] for row in call["rows"]} in ({"420"}, {"440"}) for call in calls)
+
+
+def test_target_match_diagnostics_retain_shared_match_dependence():
+    rows = []
+    for account, identity in (("One#EUW", "identity-1"), ("Two#EUW", "identity-2")):
+        rows.extend(
+            observation(index, champion, account=account, identity=identity)
+            for index, champion in enumerate(("Ahri", "Lux", "Syndra", "Ahri"), 1)
+        )
+
+    events, metadata = replay_preferences(
+        rows, builder=frequency_builder([]), prefixes=(3,)
+    )
+
+    assert len(events) == 2
+    assert {event["target_match_id"] for event in events} == {"EUW1_4"}
+    assert all(event["known_hit_3_mechanical"] for event in events)
+    assert metadata["unique_target_matches"] == 1
+    assert metadata["unique_target_matches_by_prefix"] == {"3": 1}
+    assert metadata["shared_target_matches"] == 1
+    assert metadata["events_on_shared_target_matches"] == 2
+    assert metadata["maximum_target_match_multiplicity"] == 2
+    assert metadata["events_per_account"] == {"identity-1": 1, "identity-2": 1}
 
 
 def test_non_strict_time_and_unknown_catalog_target_are_not_scored():
@@ -188,6 +253,7 @@ def test_controlled_metrics_keep_reuse_discovery_and_baselines_distinct():
     assert result["observed_reuse"]["rate"] == 0.5
     assert result["known"]["hit_at_3_familiar"]["rate"] == 1.0
     assert result["discover"]["coverage_at_3_unseen"]["rate"] == 1.0
+    assert result["discover"]["coverage_at_3_genuinely_novel"] == result["discover"]["coverage_at_3_unseen"]
     assert result["baselines"]["raw_frequency_hit_at_3_familiar"]["rate"] == 0.0
     assert result["baselines"]["paired_known_vs_frequency"]["net_successes"] == 1
     assert result["next_choice"]["missing_from_full_output"]["rate"] == 0.0
@@ -267,6 +333,7 @@ def test_actual_engine_low_data_replay_is_structural_not_predictive_certificatio
 
     report = build_report(path)
 
+    assert report["protocol"]["version"] == "observed-preference-next-choice-v2"
     assert report["eligibility"]["eligible_strata_by_prefix"] == {
         "3": 1, "5": 1, "10": 1, "20": 1
     }

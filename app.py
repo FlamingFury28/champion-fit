@@ -1681,6 +1681,9 @@ def _query_database_raw(path: str, params: dict[str, list[str]], connection=None
         connection = STORAGE.connect()
     try:
         params = canonical_account_params(connection, params)
+        if path == "/api/recommendation-feedback":
+            from recommendation_feedback import feedback_library
+            return HTTPStatus.OK, feedback_library(connection, selected_accounts(params))
         if path in {"/api/playstyles", "/api/playstyle-evidence"}:
             from playstyle_analysis import analyze, evidence
             from playstyle_metrics import fetch_metrics

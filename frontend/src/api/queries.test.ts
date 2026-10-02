@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { championsQuery, matchupsQuery, queryKeys, recommendationEvidenceQuery, recommendationsQuery, retainScopedPlaceholder, synergyQueryInput, trainingPlanQuery } from './queries'
+import { championsQuery, matchupsQuery, queryKeys, recommendationEvidenceQuery, recommendationFeedbackQuery, recommendationsQuery, retainScopedPlaceholder, synergyQueryInput, trainingPlanQuery } from './queries'
 import type { ScopeSnapshot } from './client'
 
 const alphaScope: ScopeSnapshot = { accounts: ['Alpha#EUW'], companion: null }
@@ -102,5 +102,22 @@ describe('placeholder delle query scoped', () => {
     expect(queryKeys.recommendations(alphaScope, { ...filters, champion: 'Lux' })).not.toEqual(base)
     expect(recommendationsQuery(alphaScope, filters).placeholderData).toBeUndefined()
     expect(recommendationsQuery(alphaScope, filters).retry).toBe(false)
+  })
+
+  it('legge il registro feedback per il solo scope account senza conservare altri scope', async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response('{"revision":0,"accounts":[],"suspended_accounts":[],"unresolved_accounts":[],"items":[],"options":[],"catalog_version":"test"}', { headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetch)
+    const companionScope: ScopeSnapshot = { accounts: ['Alpha#EUW'], companion: { name: 'Duo', accounts: ['Friend#EUW'], mode: 'only', profileAccounts: ['Alpha#EUW'] } }
+    const query = recommendationFeedbackQuery(companionScope)
+    const signal = new AbortController().signal
+    await query.queryFn!({ signal } as never)
+    const request = new URL(String(fetch.mock.calls[0]?.[0]), 'http://localhost')
+    expect(request.searchParams.getAll('account')).toEqual(['Alpha#EUW'])
+    expect(request.searchParams.has('companion_account')).toBe(false)
+    expect(fetch.mock.calls[0]?.[1]).toMatchObject({ signal })
+    expect(query.queryKey).toEqual(queryKeys.recommendationFeedback(alphaScope))
+    expect(query.placeholderData).toBeUndefined()
+    expect(queryKeys.recommendationFeedback(betaScope)).not.toEqual(query.queryKey)
+    vi.unstubAllGlobals()
   })
 })

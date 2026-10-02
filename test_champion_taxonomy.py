@@ -40,6 +40,8 @@ class ChampionTaxonomyTests(unittest.TestCase):
         for entry in catalog["champions"]:
             self.assertTrue(entry["classes"])
             self.assertTrue(entry["tags"])
+            self.assertEqual(set(entry["tag_reasons"]), set(entry["tags"]))
+            self.assertTrue(all(reason.strip() for reason in entry["tag_reasons"].values()))
             self.assertTrue(entry["roles"])
             self.assertEqual(len(entry["roles"]), len(set(entry["roles"])))
             self.assertTrue(set(entry["roles"]) <= roles)

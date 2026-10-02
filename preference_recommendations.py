@@ -5,13 +5,14 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
+import math
 import re
 from typing import Any
 
 from champion_taxonomy import canonical_champion, load_catalog
 
 
-MODEL_VERSION = "observed_preferences_v1"
+MODEL_VERSION = "observed_preferences_v2"
 
 
 def _key(value: object) -> str:
@@ -152,12 +153,19 @@ def _icon(entry: Mapping[str, Any], version: str) -> str:
     return f"https://ddragon.leagueoflegends.com/cdn/{version}/img/champion/{entry['id']}.png" if version else ""
 
 
-def _performance(rows, candidate_rows, accounts, confidence, family_size, include_performance):
+def _performance(
+    rows, candidate_rows, accounts, confidence, family_size, include_performance,
+    meaningful_delta, family_alpha,
+):
     """Use the separately owned observed-performance API without a numeric fallback."""
     if not include_performance:
         return None
     from observed_performance import observed_performance
-    return observed_performance(rows, candidate_rows, accounts, confidence=confidence, family_size=family_size, meaningful_delta=.03)
+    return observed_performance(
+        rows, candidate_rows, accounts, confidence=confidence,
+        family_size=family_size, meaningful_delta=meaningful_delta,
+        family_alpha=family_alpha,
+    )
 
 
 def _feedback(feedback, account_keys, aliases, entries, observed_champions, role):
@@ -194,7 +202,8 @@ def _preference(preferences, account: str, champion: str, role: str) -> str | No
 def build_recommendations(
     rows, lifetime_rows, accounts, role, *, feedback=None, limit=6, recent_games=20,
     catalog=None, trial_budget=3, confidence=.9, include_performance=True,
-    performance_family_size=None,
+    performance_family_size=None, meaningful_delta=.03, family_alpha=.05,
+    ranking_scope_rows=None,
 ) -> dict[str, Any]:
     """Build a small, descriptive preference list from contextual observations.
 
@@ -207,10 +216,16 @@ def build_recommendations(
         recent_games = None if recent_games is None else max(int(recent_games), 0)
         trial_budget = max(int(trial_budget), 0)
         confidence = float(confidence)
+        meaningful_delta = float(meaningful_delta)
+        family_alpha = float(family_alpha)
     except (TypeError, ValueError):
         raise ValueError("limit, recent_games, trial_budget, and confidence must be numeric") from None
     if not 0 < confidence < 1:
         raise ValueError("confidence must be between zero and one")
+    if not math.isfinite(meaningful_delta) or not 0 <= meaningful_delta < 1:
+        raise ValueError("meaningful_delta must be between zero and one")
+    if not math.isfinite(family_alpha) or not 0 < family_alpha < 1:
+        raise ValueError("family_alpha must be between zero and one")
     if performance_family_size is not None:
         if type(performance_family_size) is not int or performance_family_size < 1:
             raise ValueError("performance_family_size must be a positive integer")
@@ -227,6 +242,40 @@ def build_recommendations(
     for row in observed:
         by_champion[row["champion"]].append(row)
     preferences = _feedback(feedback, account_set, aliases, entries, set(by_champion), requested_role)
+
+    ranking_observed = (
+        observed if ranking_scope_rows is None else
+        _deduplicate(
+            ranking_scope_rows, account_set, account_labels, aliases, entries,
+            requested_role=requested_role, filter_role=False,
+        )
+    )
+    ranking_active = [
+        account for account in account_order
+        if any(row["account_key"] == account for row in ranking_observed)
+    ]
+    ranking_preference_rows = _recent(ranking_observed, ranking_active, recent_games)
+    if ranking_scope_rows is not None:
+        ranking_window = {
+            (row["account_key"], row["match_id"]) for row in ranking_preference_rows
+        }
+        preference_rows = [
+            row for row in observed
+            if (row["account_key"], row["match_id"]) in ranking_window
+        ]
+    ranking_preferences = (
+        preferences if ranking_scope_rows is None else
+        _feedback(
+            feedback, account_set, aliases, entries,
+            {row["champion"] for row in ranking_observed}, "ALL",
+        )
+    )
+    ranking_affinity_counts: dict[str, int] = defaultdict(int)
+    for row in ranking_preference_rows:
+        if _preference(
+            ranking_preferences, row["account_key"], row["champion"], row["role"]
+        ) != "dislike":
+            ranking_affinity_counts[row["account_key"]] += 1
 
     # Dislike removes only that account's implicit source signal. Archived rows
     # remain available to the known list and observed-performance description.
@@ -285,10 +334,14 @@ def build_recommendations(
         })
         candidate_rows = by_champion.get(champion, [])
         played_accounts = {row["account_key"] for row in candidate_rows}
-        shares = [len(affinity_by_account_champion[(account, champion)]) /
-                  max(affinity_counts[account], 1)
-                  for account in active]
-        score = sum(shares) / len(active) if active else None
+        scoring_accounts = ranking_active if ranking_scope_rows is not None else active
+        denominators = ranking_affinity_counts if ranking_scope_rows is not None else affinity_counts
+        shares = [
+            len(affinity_by_account_champion[(account, champion)]) /
+            max(denominators[account], 1)
+            for account in scoring_accounts
+        ]
+        score = sum(shares) / len(scoring_accounts) if scoring_accounts else None
         recent_count = sum(len(affinity_by_account_champion[(account, champion)]) for account in active)
         dates = [row["date_key"][1] for row in candidate_rows if row["date_key"][1]]
         days = {value[:10] for value in dates}
@@ -312,7 +365,11 @@ def build_recommendations(
             "icon_url": _icon(entry, version), "kind": "familiar", "preference_score": score,
             "similarity": None, "games": len(candidate_rows), "account_count": len(played_accounts),
             "selected_account_count": len(account_order), "source_champions": source, "reasons": reasons,
-            "performance": _performance(observed, candidate_rows, [account_labels[key] for key in account_order], confidence, performance_family_size, include_performance),
+            "performance": _performance(
+                observed, candidate_rows, [account_labels[key] for key in account_order],
+                confidence, performance_family_size, include_performance,
+                meaningful_delta, family_alpha,
+            ),
             "feedback": "like" if champion in likes else None,
         }
 
@@ -340,7 +397,8 @@ def build_recommendations(
                 continue
             if requested_role not in {"", "ALL"} and requested_role not in entry["roles"]:
                 continue
-            account_scores, sources = [], defaultdict(lambda: {"games": 0, "accounts": set()})
+            account_scores, priority_scores = [], []
+            sources = defaultdict(lambda: {"games": 0, "accounts": set()})
             for account in affinity_accounts:
                 explicit_sources = explicit_by_account[account]
                 # Explicit feedback has priority for its account. Multiple
@@ -362,7 +420,26 @@ def build_recommendations(
                     aggregate["games"] += games
                     aggregate["accounts"].add(account)
                 account_scores.append(score)
+                if ranking_scope_rows is None or explicit_sources:
+                    priority_scores.append(score)
+                else:
+                    role_games = sum(source_by_account[account].values())
+                    priority_scores.append(
+                        score * role_games / max(ranking_affinity_counts[account], 1)
+                    )
             similarity = sum(account_scores) / len(account_scores) if account_scores else 0.0
+            if ranking_scope_rows is None:
+                priority_score = similarity
+            else:
+                priority_accounts = set(ranking_active) | {
+                    account for account, champions in explicit_by_account.items() if champions
+                }
+                priority_by_account = dict(zip(affinity_accounts, priority_scores))
+                priority_score = (
+                    sum(priority_by_account.get(account, 0.0) for account in priority_accounts) /
+                    len(priority_accounts)
+                    if priority_accounts else 0.0
+                )
             if similarity <= 0:
                 continue
             source_items = []
@@ -377,12 +454,17 @@ def build_recommendations(
             discover.append({
                 "champion": champion, "name": entry["name"], "role": requested_role,
                 "icon_url": _icon(entry, version), "kind": "discovery", "preference_score": None,
-                "similarity": similarity, "games": 0, "account_count": 0,
+                "similarity": similarity,
+                **({"priority_score": priority_score} if ranking_scope_rows is not None else {}),
+                "games": 0, "account_count": 0,
                 "selected_account_count": len(account_order), "source_champions": source_items,
                 "reasons": ["Somiglianza delle caratteristiche con le scelte e le preferenze dichiarate degli account; non è una probabilità personale."],
                 "performance": None, "feedback": None,
             })
-    discover.sort(key=lambda item: (-item["similarity"], item["name"].casefold(), item["champion"]))
+    discover.sort(key=lambda item: (
+        -item.get("priority_score", item["similarity"]),
+        -item["similarity"], item["name"].casefold(), item["champion"],
+    ))
     discover = discover[:limit]
 
     trial_items = []

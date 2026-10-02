@@ -43,6 +43,16 @@ class PlaystyleAnalysisTests(unittest.TestCase):
         self.assertEqual(result["x"]["support_per_account"]["two"]["baseline_games"], 0)
         self.assertFalse(result["x"]["supported"])
 
+    def test_composition_uses_the_reason_for_each_category_only(self):
+        ps.champion_entry("A")["tag_reasons"] = {"x": "Controlla lo spazio con terreno.",
+                                                  "y": "Ripete danno con attacchi potenziati."}
+        ranked = self.rank(series("A", 3, 2) + series("B", 2, 3))
+        self.assertEqual(ranked["x"]["composition"][0]["reason"], "Controlla lo spazio con terreno.")
+        self.assertEqual(ranked["y"]["composition"][0]["reason"], "Ripete danno con attacchi potenziati.")
+        self.assertNotIn("reason", ranked["z"]["composition"][0])
+        self.assertNotIn("reason", ps.composition(series("A", 3, 2))[0])
+        self.assertEqual(ranked["x"]["composition"][0]["wins"], 3)
+
     def test_absent_accounts_or_complement_block_conclusions(self):
         rows = series("A", 100, 0) + series("B", 0, 100)
         self.assertTrue(self.rank(rows)["x"]["supported"])

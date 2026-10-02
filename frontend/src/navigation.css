@@ -32,6 +32,7 @@
 .hub-secondary { border: 1px solid var(--border); border-radius: var(--radius-panel); background: color-mix(in srgb, var(--surface) 72%, transparent); }
 .hub-secondary > summary { display: flex; align-items: center; gap: 10px; padding: .75rem 1rem; color: var(--text-soft); font-size: 13px; font-weight: 650; cursor: pointer; }
 .hub-secondary > summary span { color: var(--muted); font-size: 11px; font-weight: 500; }
+.hub-secondary__label { margin: .35rem 1rem .5rem; color: var(--muted); font-size: 12px; }
 .hub-secondary__links { display: flex; flex-wrap: wrap; gap: .4rem; padding: 0 .5rem .5rem; }
 .hub-secondary__links a { min-height: 40px; display: inline-flex; align-items: center; padding: .55rem .85rem; border-radius: var(--radius-control); color: var(--text-soft); text-decoration: none; font-size: 12px; font-weight: 600; }
 .hub-secondary__links a[aria-current], .hub-secondary__links a:hover { color: var(--text); background: var(--accent-soft); }

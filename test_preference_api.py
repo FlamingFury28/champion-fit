@@ -27,8 +27,113 @@ def test_one_game_produces_choices_and_unknown_account_does_not_invent_results(t
     assert status == 200
     assert group["known"][0]["preference_score"] == single["known"][0]["preference_score"]
     assert "absent" in group["coverage"]["missing_accounts"]
+    assert group["context"]["unresolved_accounts"] == ["absent"]
     assert group["known"][0]["performance"]["win_rate"] == 100
     assert group["known"][0]["performance"]["baseline_win_rate"] is None
+
+
+def test_default_scope_includes_tracked_account_with_only_explicit_feedback(tmp_path):
+    from recommendation_feedback import save_feedback
+
+    fixture = ScopeFixture(tmp_path)
+    with closing(fixture.storage.connect()) as connection, connection:
+        connection.execute(
+            "INSERT INTO riot_account_identities(identity_id,account) VALUES(?,?)",
+            ("identity-new", "New#EUW"),
+        )
+        connection.execute(
+            "INSERT INTO riot_identity_puuids(puuid,identity_id) VALUES(?,?)",
+            ("puuid-new", "identity-new"),
+        )
+        connection.execute(
+            "INSERT INTO tracked_account_puuids(puuid,account) VALUES(?,?)",
+            ("puuid-new", "New#EUW"),
+        )
+        save_feedback(connection, ["New#EUW"], "Ahri", "MIDDLE", "like", 0)
+
+    status, data = query(fixture, role="ALL", queue="all")
+
+    assert status == 200
+    assert data["coverage"]["selected_accounts"] == ["New#EUW"]
+    assert data["coverage"]["active_accounts"] == []
+    assert [(item["champion"], item["role"], item["feedback"])
+            for item in data["known"]] == [("Ahri", "MIDDLE", "like")]
+
+
+def test_verified_rename_maps_historical_rows_without_duplicating_default_scope(tmp_path):
+    from recommendation_feedback import save_feedback
+
+    fixture = ScopeFixture(tmp_path)
+    fixture.series("Old#EUW", "Annie", 1, 1)
+    with closing(fixture.storage.connect()) as connection, connection:
+        connection.executemany(
+            "INSERT INTO riot_account_identities(identity_id,account) VALUES(?,?)",
+            [("identity-new", "New#EUW"), ("identity-zero", "Zero#EUW")],
+        )
+        connection.executemany(
+            "INSERT INTO riot_identity_puuids(puuid,identity_id) VALUES(?,?)",
+            [("puuid-new", "identity-new"), ("puuid-zero", "identity-zero")],
+        )
+        connection.executemany(
+            "INSERT INTO tracked_account_puuids(puuid,account) VALUES(?,?)",
+            [("puuid-new", "New#EUW"), ("puuid-zero", "Zero#EUW")],
+        )
+        connection.execute(
+            "INSERT INTO riot_account_aliases"
+            "(account,normalized_riot_id,display_riot_id,puuid,verification_source,verified_at) "
+            "VALUES(?,?,?,?,?,?)",
+            ("New#EUW", "old#euw", "Old#EUW", "puuid-new", "verified_account_puuid", "2026-09-01"),
+        )
+        save_feedback(connection, ["Zero#EUW"], "Ahri", "MIDDLE", "like", 0)
+
+    status, default = query(fixture, role="ALL", queue="all")
+    explicit_status, explicit = query(
+        fixture, account=["New#EUW"], role="MIDDLE", queue="all",
+    )
+
+    assert status == explicit_status == 200
+    assert default["coverage"]["selected_accounts"] == ["New#EUW", "Zero#EUW"]
+    assert default["coverage"]["active_accounts"] == ["New#EUW"]
+    assert default["coverage"]["missing_accounts"] == ["Zero#EUW"]
+    assert {(item["champion"], item["feedback"]) for item in default["known"]} == {
+        ("Ahri", "like"), ("Annie", None),
+    }
+    assert [(item["champion"], item["games"]) for item in explicit["known"]] == [
+        ("Annie", 1),
+    ]
+
+
+def test_ambiguous_verified_alias_cannot_claim_same_named_raw_history(tmp_path):
+    fixture = ScopeFixture(tmp_path)
+    fixture.series("Shared#EUW", "Annie", 1, 1)
+    with closing(fixture.storage.connect()) as connection, connection:
+        connection.executemany(
+            "INSERT INTO riot_account_identities(identity_id,account) VALUES(?,?)",
+            [("identity-first", "First#EUW"), ("identity-second", "Second#EUW")],
+        )
+        connection.executemany(
+            "INSERT INTO riot_identity_puuids(puuid,identity_id) VALUES(?,?)",
+            [("puuid-first", "identity-first"), ("puuid-second", "identity-second")],
+        )
+        connection.executemany(
+            "INSERT INTO riot_account_aliases"
+            "(account,normalized_riot_id,display_riot_id,puuid,verification_source,verified_at) "
+            "VALUES(?,?,?,?,?,?)",
+            [
+                ("First#EUW", "shared#euw", "Shared#EUW", "puuid-first", "verified_account_puuid", "2026-09-01"),
+                ("Second#EUW", "shared#euw", "Shared#EUW", "puuid-second", "verified_account_puuid", "2026-09-01"),
+            ],
+        )
+
+    status, data = query(
+        fixture, account=["Shared#EUW"], role="MIDDLE", queue="all",
+    )
+
+    assert status == 200
+    assert data["coverage"]["selected_accounts"] == ["Shared#EUW"]
+    assert data["coverage"]["active_accounts"] == []
+    assert data["coverage"]["missing_accounts"] == ["Shared#EUW"]
+    assert data["known"] == data["discover"] == []
 
 
 def test_explicit_empty_context_is_not_broadened_and_lifetime_is_respected(tmp_path):
@@ -131,6 +236,161 @@ def test_all_role_lists_and_trial_plan_keep_global_configured_limits(tmp_path):
     assert status == 200
     assert automatic["context"]["automatic_role"] is True
     assert automatic["context"]["role"] in {"MIDDLE", "TOP", "SUPPORT"}
+
+
+def test_game_period_is_applied_after_explicit_role_and_queue_filters(tmp_path):
+    fixture = ScopeFixture(tmp_path)
+    fixture.series("one", "Ahri", 3, 2)
+    fixture.series("one", "Riven", 3, 1)
+    with closing(fixture.storage.connect()) as connection, connection:
+        connection.execute(
+            "UPDATE match_quality SET date=printf('2026-09-%02dT00:00:00Z', id)"
+        )
+        connection.execute(
+            "UPDATE match_quality SET role='TOP',queue='440' WHERE champion='Riven'"
+        )
+        snapshot = get_settings_snapshot(connection)
+        settings = deepcopy(snapshot["settings"])
+        settings["recommendations"]["period"] = {"value": 3, "unit": "games"}
+        save_settings(connection, snapshot["revision"], settings)
+
+    status, data = query(
+        fixture, account=["one"], role="MIDDLE", queue="420",
+        as_of="2026-10-01T00:00:00Z",
+    )
+
+    assert status == 200
+    assert [(item["champion"], item["games"]) for item in data["known"]] == [("Ahri", 3)]
+    assert data["context"]["period"] == {"value": 3, "unit": "games"}
+    assert data["context"]["observations"] == 3
+
+
+def test_automatic_queue_is_selected_before_the_game_window_is_sliced(tmp_path):
+    fixture = ScopeFixture(tmp_path)
+    fixture.series("one", "Ahri", 4, 2)
+    fixture.series("one", "Riven", 3, 1)
+    with closing(fixture.storage.connect()) as connection, connection:
+        connection.execute(
+            "UPDATE match_quality SET date=printf('2026-09-%02dT00:00:00Z', id)"
+        )
+        connection.execute(
+            "UPDATE match_quality SET role='TOP',queue='440' WHERE champion='Riven'"
+        )
+        snapshot = get_settings_snapshot(connection)
+        settings = deepcopy(snapshot["settings"])
+        settings["recommendations"]["period"] = {"value": 2, "unit": "games"}
+        save_settings(connection, snapshot["revision"], settings)
+
+    status, data = query(
+        fixture, account=["one"], role="ALL", queue="auto",
+        as_of="2026-10-01T00:00:00Z",
+    )
+
+    assert status == 200
+    assert data["context"]["queue"] == "420"
+    assert data["context"]["observations"] == 2
+    assert [(item["champion"], item["games"]) for item in data["known"]] == [("Ahri", 2)]
+
+
+def test_companion_filter_is_applied_before_the_game_window_is_sliced(tmp_path):
+    fixture = ScopeFixture(tmp_path)
+    fixture.series("one", "Ahri", 3, 2)
+    fixture.series("one", "Lux", 3, 1)
+    with closing(fixture.storage.connect()) as connection, connection:
+        connection.execute(
+            "UPDATE match_quality SET date=printf('2026-09-%02dT00:00:00Z', id)"
+        )
+        connection.executemany(
+            "INSERT INTO match_participants(match_id,puuid,riot_id) VALUES(?,?,?)",
+            [(f"scope-{index}", f"friend-{index}", "Friend#EUW") for index in range(4, 7)],
+        )
+        snapshot = get_settings_snapshot(connection)
+        settings = deepcopy(snapshot["settings"])
+        settings["recommendations"]["period"] = {"value": 2, "unit": "games"}
+        save_settings(connection, snapshot["revision"], settings)
+
+    status, data = query(
+        fixture, account=["one"], role="MIDDLE", queue="420",
+        companion_account=["Friend#EUW"], companion_mode="exclude",
+        as_of="2026-10-01T00:00:00Z",
+    )
+
+    assert status == 200
+    assert data["context"]["companion_filter_active"] is True
+    assert data["context"]["observations"] == 2
+    assert [(item["champion"], item["games"]) for item in data["known"]] == [("Ahri", 2)]
+
+
+def test_all_role_ranking_uses_each_accounts_full_context_denominator(tmp_path):
+    fixture = ScopeFixture(tmp_path)
+    fixture.series("one", "Ahri", 4, 2)
+    fixture.series("one", "Lux", 1, 1)
+    fixture.series("one", "Riven", 1, 1)
+    with closing(fixture.storage.connect()) as connection, connection:
+        connection.execute("UPDATE match_quality SET role='TOP' WHERE champion='Riven'")
+
+    status, data = query(fixture, account=["one"], role="ALL", queue="all")
+
+    assert status == 200
+    assert [
+        (item["champion"], item["role"], item["preference_score"])
+        for item in data["known"]
+    ] == [
+        ("Ahri", "MIDDLE", 4 / 6),
+        ("Lux", "MIDDLE", 1 / 6),
+        ("Riven", "TOP", 1 / 6),
+    ]
+
+
+def test_lifetime_tried_detail_is_familiar_outside_current_role(tmp_path):
+    fixture = ScopeFixture(tmp_path)
+    fixture.series("one", "Annie", 1, 1)
+
+    status, data = query(
+        fixture, account=["one"], role="SUPPORT", queue="all", champion="Annie",
+    )
+
+    assert status == 200
+    assert data["candidate"]["kind"] == "familiar"
+    assert data["candidate"]["games"] == 0
+    assert data["candidate"]["similarity"] is None
+    assert "storico selezionato" in data["candidate"]["reasons"][0]
+
+
+def test_all_role_performance_uses_global_family_and_configured_decision_settings(tmp_path):
+    from observed_performance import observed_performance
+
+    fixture = ScopeFixture(tmp_path)
+    fixture.series("one", "Annie", 1, 1)
+    fixture.series("one", "Riven", 1, 0)
+    with closing(fixture.storage.connect()) as connection, connection:
+        connection.execute("UPDATE match_quality SET role='TOP' WHERE champion='Riven'")
+        snapshot = get_settings_snapshot(connection)
+        settings = deepcopy(snapshot["settings"])
+        settings["evidence"].update(meaningful_delta=.07, family_alpha=.02)
+        save_settings(connection, snapshot["revision"], settings)
+
+    calls = []
+
+    def recording_performance(*args, **kwargs):
+        calls.append(kwargs)
+        return observed_performance(*args, **kwargs)
+
+    with patch("observed_performance.observed_performance", side_effect=recording_performance):
+        status, data = query(
+            fixture, account=["one"], role="ALL", queue="all", champion="Annie",
+        )
+
+    assert status == 200
+    support = next(item for item in data["candidates"] if item["role"] == "SUPPORT")
+    assert support["kind"] == "familiar"
+    assert support["performance"]["family_size"] == 2
+    assert support["performance"]["meaningful_delta"] == .07
+    assert support["performance"]["family_alpha"] == .02
+    assert calls
+    assert {call["family_size"] for call in calls} == {2}
+    assert {call["meaningful_delta"] for call in calls} == {.07}
+    assert {call["family_alpha"] for call in calls} == {.02}
 
 
 def test_recommendations_ignore_old_prior_weights_and_wins_but_keep_actual_record(tmp_path):

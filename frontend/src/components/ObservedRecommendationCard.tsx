@@ -34,22 +34,29 @@ export function RecommendationFeedback({ item, accounts, allowAllAccountsShortcu
   allowAllAccountsShortcut: boolean
   feedbackRevision: number
 }) {
+  void allowAllAccountsShortcut
   const queryClient = useQueryClient()
   const [selectedAccounts, setSelectedAccounts] = useState(accounts)
   const feedback = useMutation({
     mutationFn: (preference: RecommendationPreference) => postJson<unknown>('/api/recommendation-feedback', {
-      accounts: selectedAccounts.length === accounts.length && allowAllAccountsShortcut ? [] : selectedAccounts,
+      accounts: selectedAccounts,
       champion: item.champion,
       role: item.role,
       preference,
       expected_revision: feedbackRevision,
     } satisfies RecommendationFeedbackInputDto),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['api', 'recommendations'] })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['api', 'recommendations'] }),
+        queryClient.invalidateQueries({ queryKey: ['api', 'recommendation-feedback'] }),
+      ])
     },
     onError: async (error) => {
       if (error instanceof ApiError && error.status === 409) {
-        await queryClient.invalidateQueries({ queryKey: ['api', 'recommendations'] })
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['api', 'recommendations'] }),
+          queryClient.invalidateQueries({ queryKey: ['api', 'recommendation-feedback'] }),
+        ])
       }
     },
   })

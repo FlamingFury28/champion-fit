@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, useLocation } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { RecommendationsResponseDto } from '../api/types'
 import { discoveryRecommendation, recommendationsFixture } from '../test/recommendations-fixture'
 import { ScoutPage } from './ScoutPage'
 
@@ -17,11 +18,11 @@ function response(data: unknown) {
   return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } })
 }
 
-function renderScout(url: string) {
+function renderScout(url: string, overrides: Partial<RecommendationsResponseDto> = {}) {
   const discovery = discoveryRecommendation({
     source_champions: [{ champion: 'Ahri', name: 'Ahri', games: 1, similarity: 0.75, matched_tags: ['class:assassin', 'style:duel'] }],
   })
-  vi.stubGlobal('fetch', vi.fn(async () => response(recommendationsFixture({ known: [], discover: [discovery] }))))
+  vi.stubGlobal('fetch', vi.fn(async () => response(recommendationsFixture({ known: [], discover: [discovery], ...overrides }))))
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const user = userEvent.setup()
   render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[url]}><ScoutPage embedded /><LocationProbe /></MemoryRouter></QueryClientProvider>)
@@ -47,6 +48,26 @@ describe('ScoutPage filtro categoria dagli stili', () => {
     expect(screen.getByRole('option', { name: 'Assassino' })).toBeVisible()
     await user.selectOptions(select, 'ALL')
     await waitFor(() => expect(screen.getByLabelText('URL corrente')).not.toHaveTextContent('category='))
+  })
+
+  it('esclude account sospesi e non risolti dai destinatari delle preferenze', async () => {
+    renderScout('/app/fit?section=training', {
+      context: {
+        accounts: ['Alpha#EUW', 'Suspended#EUW', 'Unknown#EUW'],
+        role: 'MIDDLE', queue: '420', days: 'all',
+        suspended_accounts: ['Suspended#EUW'], unresolved_accounts: ['Unknown#EUW'],
+      },
+      coverage: {
+        selected_accounts: ['Alpha#EUW', 'Suspended#EUW', 'Unknown#EUW'],
+        active_accounts: ['Alpha#EUW'],
+        missing_accounts: ['Suspended#EUW', 'Unknown#EUW'],
+        games: 1, observations: 1,
+      },
+    })
+    const card = (await screen.findByText('Orianna')).closest<HTMLElement>('.recommendation-card')!
+    expect(within(card).getByText('Si applica a Alpha#EUW.')).toBeVisible()
+    expect(within(card).queryByText(/Suspended#EUW/)).not.toBeInTheDocument()
+    expect(within(card).queryByText(/Unknown#EUW/)).not.toBeInTheDocument()
   })
 
   it('mantiene visibile una categoria attiva senza corrispondenze e il reset la rimuove', async () => {

@@ -147,19 +147,28 @@ def test_observed_performance_is_called_separately_and_never_used_for_ordering()
     calls = []
     module = ModuleType("observed_performance")
 
-    def observed_performance(rows, candidate_rows, accounts, confidence, family_size, meaningful_delta):
-        calls.append((rows, candidate_rows, accounts, confidence, family_size, meaningful_delta))
+    def observed_performance(
+        rows, candidate_rows, accounts, confidence, family_size,
+        meaningful_delta, family_alpha,
+    ):
+        calls.append((
+            rows, candidate_rows, accounts, confidence, family_size,
+            meaningful_delta, family_alpha,
+        ))
         return {"observed": len(candidate_rows)}
 
     module.observed_performance = observed_performance
     rows = [row("one", "1", "A"), row("one", "2", "B")]
     with patch.dict(sys.modules, {"observed_performance": module}):
-        result = build_recommendations(rows, rows, ["one"], "MIDDLE", catalog=CATALOG, confidence=.8)
+        result = build_recommendations(
+            rows, rows, ["one"], "MIDDLE", catalog=CATALOG,
+            confidence=.8, meaningful_delta=.07, family_alpha=.02,
+        )
 
     assert [item["champion"] for item in result["known"]] == ["A", "B"]
     assert all(item["performance"] == {"observed": 1} for item in result["known"])
     assert len(calls) == 2
-    assert all(call[2:] == (["one"], .8, 2, .03) for call in calls)
+    assert all(call[2:] == (["one"], .8, 2, .07, .02) for call in calls)
 
 
 def test_missing_performance_module_is_not_silently_replaced_with_a_numeric_fallback():
@@ -364,3 +373,68 @@ def test_unknown_observed_like_is_familiar_priority_but_never_a_discovery_simila
     assert all(source["champion"] != "Future Champion"
                for item in result["discover"] for source in item["source_champions"])
     assert result["discover"][0]["source_champions"][0]["champion"] == "A"
+
+
+def test_all_role_discovery_priority_uses_role_exposure_but_keeps_raw_similarity():
+    rows = [
+        *[row("one", f"middle-{index}", "A") for index in range(4)],
+        row("one", "top", "D", role="TOP"),
+    ]
+    middle = build_recommendations(
+        rows[:-1], rows, ["one"], "MIDDLE", catalog=CATALOG,
+        include_performance=False, ranking_scope_rows=rows,
+    )
+    top = build_recommendations(
+        rows[-1:], rows, ["one"], "TOP", catalog=CATALOG,
+        include_performance=False, ranking_scope_rows=rows,
+    )
+
+    beta = next(item for item in middle["discover"] if item["champion"] == "B")
+    epsilon = next(item for item in top["discover"] if item["champion"] == "E")
+    assert beta["similarity"] == epsilon["similarity"] == 1
+    assert beta["priority_score"] == 4 / 5
+    assert epsilon["priority_score"] == 1 / 5
+
+    explicitly_liked = build_recommendations(
+        [], rows, ["one"], "TOP", catalog=CATALOG, include_performance=False,
+        ranking_scope_rows=rows,
+        feedback=[{"account": "one", "champion": "D", "role": "TOP", "preference": "like"}],
+    )
+    explicit_epsilon = next(
+        item for item in explicitly_liked["discover"] if item["champion"] == "E"
+    )
+    assert explicit_epsilon["similarity"] == explicit_epsilon["priority_score"] == 1
+
+
+def test_all_role_denominator_removes_each_accounts_dislikes_in_other_roles():
+    rows = [
+        *[row("one", f"middle-{index}", "A") for index in range(4)],
+        row("one", "top", "D", role="TOP"),
+    ]
+
+    result = build_recommendations(
+        rows[:-1], rows, ["one"], "MIDDLE", catalog=CATALOG,
+        include_performance=False, ranking_scope_rows=rows,
+        feedback=[{"account": "one", "champion": "D", "role": "TOP", "preference": "dislike"}],
+    )
+
+    assert result["known"][0]["champion"] == "A"
+    assert result["known"][0]["preference_score"] == 1
+
+
+def test_all_role_recent_window_uses_one_global_account_window_for_numerator_and_denominator():
+    old_top = row("one", "old-top", "D", role="TOP", date="2026-09-01T00:00:00Z")
+    recent_middle = [
+        row("one", "middle-a", "A", date="2026-09-02T00:00:00Z"),
+        row("one", "middle-b", "B", date="2026-09-03T00:00:00Z"),
+    ]
+    all_rows = [old_top, *recent_middle]
+
+    result = build_recommendations(
+        [old_top], all_rows, ["one"], "TOP", catalog=CATALOG,
+        include_performance=False, ranking_scope_rows=all_rows, recent_games=2,
+    )
+
+    assert result["known"][0]["champion"] == "D"
+    assert result["known"][0]["preference_score"] == 0
+    assert result["coverage"]["preference_observations"] == 0

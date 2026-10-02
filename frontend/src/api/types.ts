@@ -564,6 +564,9 @@ export interface ObservedPerformanceDto {
   interval_high: number | null
   confidence: number | string
   baseline_games: number
+  paired_candidate_win_rate?: number | null
+  paired_candidate_low?: number | null
+  paired_candidate_high?: number | null
   baseline_win_rate: number | null
   baseline_low: number | null
   baseline_high: number | null
@@ -574,6 +577,15 @@ export interface ObservedPerformanceDto {
   per_account: Record<string, unknown> | Array<Record<string, unknown>>
   supported: boolean
   direction: string
+  family_size?: number
+  family_alpha?: number
+  meaningful_delta?: number
+  meaningful_delta_pp?: number | null
+  decision_side_alpha?: number
+  decision_candidate_low?: number | null
+  decision_candidate_high?: number | null
+  decision_baseline_low?: number | null
+  decision_baseline_high?: number | null
   method: string
 }
 
@@ -585,6 +597,7 @@ export interface ObservedRecommendationDto {
   kind: 'familiar' | 'discovery'
   preference_score: number | null
   similarity: number | null
+  priority_score?: number | null
   games: number
   account_count: number
   selected_account_count: number
@@ -603,16 +616,18 @@ export interface RecommendationProfileItemDto {
 }
 
 export interface RecommendationsResponseDto {
-  model_version: 'observed_preferences_v1'
+  model_version: 'observed_preferences_v1' | 'observed_preferences_v2'
   algorithm_revision: number
   algorithm_fingerprint: string
   context: {
     accounts: string[]
-      role: string
-      queue: string
-      days: string | number
-      period?: { value: number; unit: 'days' | 'games' }
-      [key: string]: unknown
+    role: string
+    queue: string
+    days: string | number
+    period?: { value: number; unit: 'days' | 'games' }
+    suspended_accounts: string[]
+    unresolved_accounts: string[]
+    [key: string]: unknown
   }
   feedback_revision: number
   coverage: {
@@ -643,6 +658,33 @@ export interface RecommendationFeedbackInputDto {
   role: string
   preference: RecommendationPreference
   expected_revision: number
+}
+
+export interface RecommendationFeedbackItemDto {
+  account: string
+  champion: string
+  role: string
+  preference: RecommendationPreference
+  updated_at: string
+}
+
+export interface RecommendationFeedbackOptionDto {
+  champion: string
+  name: string
+  roles: string[]
+  roles_by_account: Record<string, string[]>
+  icon_url: string | null
+  classified: boolean
+}
+
+export interface RecommendationFeedbackResponseDto {
+  revision: number
+  accounts: string[]
+  suspended_accounts: string[]
+  unresolved_accounts: string[]
+  items: RecommendationFeedbackItemDto[]
+  options: RecommendationFeedbackOptionDto[]
+  catalog_version: string
 }
 
 export interface MatchDto {

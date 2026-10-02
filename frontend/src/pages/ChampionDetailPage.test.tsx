@@ -26,7 +26,7 @@ describe('ChampionDetailPage nuovo motore', () => {
     const top = observedRecommendation({ role: 'TOP' })
     top.performance = { ...top.performance!, games: 2, observations: 2, wins: 0, losses: 2, win_rate: 0 }
     const fetch = vi.fn(async (input: RequestInfo | URL) => { void input; return response(recommendationsFixture({
-      context: { accounts: ['Alpha#EUW'], role: 'ALL', queue: '420', days: 'all' },
+      context: { accounts: ['Alpha#EUW'], role: 'ALL', queue: '420', days: 'all', suspended_accounts: [], unresolved_accounts: [] },
       candidate: null,
       candidates: [middle, top],
       known: [],
@@ -86,11 +86,20 @@ describe('ChampionDetailPage nuovo motore', () => {
     expect(screen.queryByText('0%')).not.toBeInTheDocument()
   })
 
+  it('non dichiara preferenze o novità per un campione già giocato fuori contesto', async () => {
+    setup(observedRecommendation({ games: 0, performance: null, feedback: null }))
+    expect(await screen.findByText(/Ahri è già presente nello storico selezionato/)).toBeVisible()
+    expect(screen.getByText('Già giocato altrove')).toBeVisible()
+    expect(screen.queryByText(/Ahri è una preferenza dichiarata/)).not.toBeInTheDocument()
+    expect(screen.queryByText('Da scoprire')).not.toBeInTheDocument()
+  })
+
   it('separa le medie con coperture diverse dal confronto sugli stessi account', async () => {
     const candidate = observedRecommendation({ account_count: 3, selected_account_count: 4 })
     candidate.performance = {
       ...candidate.performance!, games: 5, observations: 8, wins: 5, losses: 3, win_rate: 67.6,
       baseline_games: 20, baseline_win_rate: 52.8, baseline_low: 40, baseline_high: 65,
+      paired_candidate_win_rate: 53.6, paired_candidate_low: 42, paired_candidate_high: 66,
       lift_pp: 0.8, comparable_accounts: ['Alpha#EUW', 'Beta#EUW'],
     }
     setup(candidate)
@@ -98,6 +107,9 @@ describe('ChampionDetailPage nuovo motore', () => {
     expect(screen.getAllByText(/Differenza negli account confrontabili \(2\)/).length).toBeGreaterThan(0)
     expect(screen.getAllByText(/2\/3 account esposti/).length).toBeGreaterThan(0)
     expect(screen.getAllByText('+0,8 pp').length).toBeGreaterThan(0)
+    expect(screen.getByText('53,6%')).toBeVisible()
+    expect(screen.getByText('Campione · account confrontabili')).toBeVisible()
+    expect(screen.getByText('Riferimento · stessi account')).toBeVisible()
     expect(screen.getByText(/non sottrae le due medie complessive/i)).toBeVisible()
   })
 })

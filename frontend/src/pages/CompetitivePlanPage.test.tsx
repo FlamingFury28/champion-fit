@@ -41,7 +41,7 @@ describe('piano competitivo', () => {
     expect(screen.getByLabelText('Budget partite')).toHaveValue(400)
   })
 
-  it('invia il budget 400 insieme ai filtri e mantiene il ciclo breve separato', async () => {
+  it('invia il budget 400 insieme ai filtri senza promuovere il ciclo breve', async () => {
     const fetch = renderPage()
     expect(await screen.findByText('Ahri')).toBeVisible()
     const url = new URL(String(fetch.mock.calls[0]?.[0]), 'http://localhost')
@@ -50,6 +50,6 @@ describe('piano competitivo', () => {
     expect(url.searchParams.get('role')).toBe('MIDDLE')
     expect(url.searchParams.get('queue')).toBe('440')
     expect(url.searchParams.get('days')).toBe('90')
-    expect(screen.getByText(/Piano di prove.*continua/i)).toBeVisible()
+    expect(screen.queryByText(/Piano di prove/i)).not.toBeInTheDocument()
   })
 })
