@@ -8,10 +8,11 @@ candidate is excluded from every account's reference sample.
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Callable, Iterable, Mapping
 
 from algorithm_settings import current_settings
+from analysis_runtime import subtract_days_clamped
 from decision_models import control_decisions, outcome_metrics
 
 
@@ -329,8 +330,8 @@ def encounter_data(
     family: list[dict] = []
     recent_days = int(matchup_settings["recent_days"])
     reference_time = _as_of(as_of)
-    cutoff = reference_time - timedelta(days=recent_days)
-    cutoff_90d = reference_time - timedelta(days=90)
+    cutoff = subtract_days_clamped(reference_time, recent_days)
+    cutoff_90d = subtract_days_clamped(reference_time, 90)
     scope_by_account = {
         account: len({row["match_id"] for row in relevant_rows if row["account"] == account})
         for account in target

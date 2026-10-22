@@ -1,6 +1,7 @@
 import { ChevronDown, SlidersHorizontal, UsersRound } from 'lucide-react'
 import { Link } from 'react-router'
 import { useScope } from '../app/scope'
+import { sameAccounts } from '../api/client'
 import { useGlassReflection } from '../app/surface-motion'
 import { AppearanceSettings } from './AppearanceSettings'
 import { DataViewSettings } from './DataViewSettings'
@@ -12,7 +13,7 @@ const integer = new Intl.NumberFormat('it-IT', { maximumFractionDigits: 0 })
 export function ScopeBar() {
   const glassRef = useGlassReflection()
   const { state, scope, availableAccounts, accountsLoading, accountsError, scopeReady, retryAccounts } = useScope()
-  const allSelected = availableAccounts.length > 0 && state.accounts.length === availableAccounts.length
+  const allSelected = availableAccounts.length > 0 && sameAccounts(scope.accounts, availableAccounts.map((item) => item.account))
   const coverage = availableAccounts
     .filter((item) => scope.accounts.includes(item.account))
     .reduce((totals, item) => ({

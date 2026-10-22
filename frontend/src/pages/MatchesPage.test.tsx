@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter, useLocation } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { queryKeys } from '../api/queries'
+import { matchHistoryFilters } from '../app/match-history-filters'
 import type { ProfileResponseDto } from '../api/types'
 import { MatchesPage } from './MatchesPage'
 
@@ -23,7 +24,7 @@ function LocationProbe() { return <output data-testid="location">{useLocation().
 
 function renderPage(url = '/app/matches') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
-  client.setQueryData(queryKeys.profile(context.scope), profile)
+  client.setQueryData(queryKeys.profile(context.scope, matchHistoryFilters(new URL(url, 'http://localhost').searchParams)), profile)
   return render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[url]}><MatchesPage /><LocationProbe /></MemoryRouter></QueryClientProvider>)
 }
 

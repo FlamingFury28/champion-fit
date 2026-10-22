@@ -1,5 +1,6 @@
 import json
 import socket
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from functools import partial
@@ -188,6 +189,157 @@ def test_missing_api_remains_a_json_404(isolated_server, method):
         assert json.loads(body) == {"error": "Endpoint not found"}
     else:
         assert body == b""
+
+
+@pytest.mark.parametrize("error,status", [
+    (sqlite3.OperationalError("database is locked"), 503),
+    (sqlite3.OperationalError("no such table: secret_table"), 500),
+    (TimeoutError("private database timeout"), 503),
+    (RuntimeError("postgresql://user:password@host/private"), 500),
+])
+def test_api_failures_return_redacted_json_and_correlated_diagnostics(isolated_server, monkeypatch, caplog, error, status):
+    def fail(*args, **kwargs):
+        raise error
+    monkeypatch.setattr(app, "query_database", fail)
+    response_status, headers, body = request(isolated_server, "GET", "/api/champions?account=private-puuid")
+    assert response_status == status
+    assert headers["content-type"] == "application/json; charset=utf-8"
+    assert headers["cache-control"] == "no-store"
+    assert len(headers["x-request-id"]) == 32
+    assert set(json.loads(body)) == {"error"}
+    assert "private" not in body.decode()
+    assert "secret_table" not in body.decode()
+    assert "password" not in caplog.text
+    assert "private-puuid" not in caplog.text
+    assert headers["x-request-id"] in caplog.text
+    if status == 503:
+        assert headers["retry-after"] == "1"
+
+
+def test_api_error_head_sends_no_body_bytes(isolated_server, monkeypatch):
+    def fail(*args):
+        raise sqlite3.OperationalError("database is locked")
+    monkeypatch.setattr(app, "query_database", fail)
+    with socket.create_connection((isolated_server["host"], isolated_server["port"]), timeout=5) as client:
+        client.sendall(b"HEAD /api/champions HTTP/1.0\r\nHost: localhost\r\n\r\n")
+        chunks = []
+        while chunk := client.recv(4096):
+            chunks.append(chunk)
+    headers, body = b"".join(chunks).split(b"\r\n\r\n", 1)
+    assert b"503" in headers.split(b"\r\n", 1)[0]
+    assert b"Content-Length:" in headers
+    assert body == b""
+
+
+@pytest.mark.parametrize("connection_error", [sqlite3.OperationalError("database is locked"), TimeoutError("private DB timeout")])
+@pytest.mark.parametrize("method,path,payload", [
+    ("PUT", "/api/algorithm-settings", {}),
+    ("PATCH", "/api/friend-groups/1", {"name": "test"}),
+    ("DELETE", "/api/friend-groups/1", None),
+    ("POST", "/api/friend-groups", {"name": "test", "aliases": ["A#EUW"]}),
+    ("POST", "/api/recommendation-feedback", {
+        "accounts": ["A#EUW"], "champion": "Ahri", "role": "MIDDLE",
+        "preference": "like", "expected_revision": 0,
+    }),
+    ("POST", "/api/annotations", {
+        "match_id": "M1", "invincible": False, "carryable_loss": False,
+        "afk_player": False, "griefer": False, "team_collapse": False,
+        "manual_label": "", "note": "", "confidence": 0.5, "expected_revision": None,
+    }),
+])
+def test_mutation_connection_failures_use_the_same_json_contract(isolated_server, monkeypatch, method, path, payload, connection_error):
+    def fail():
+        raise connection_error
+    monkeypatch.setattr(app.STORAGE, "connect", fail)
+    status, headers, body = request(isolated_server, method, path, payload=payload)
+    assert status == 503
+    assert headers["content-type"] == "application/json; charset=utf-8"
+    assert "error" in json.loads(body)
+
+
+def test_real_sqlite_driver_codes_and_postgres_states_distinguish_retryable_errors():
+    with sqlite3.connect(":memory:") as connection:
+        with pytest.raises(sqlite3.OperationalError) as error:
+            connection.execute("SELECT * FROM missing")
+        assert app.backend_error_status(error.value) == 500
+    psycopg = pytest.importorskip("psycopg")
+    assert app.backend_error_status(psycopg.errors.LockNotAvailable()) == 503
+    assert app.backend_error_status(psycopg.errors.QueryCanceled()) == 503
+    assert app.backend_error_status(psycopg.errors.UndefinedTable()) == 500
+    assert app.backend_error_status(psycopg.errors.InvalidPassword()) == 500
+
+
+def test_database_commit_failure_rolls_back_annotation_before_json_error(isolated_server, monkeypatch):
+    with sqlite3.connect(isolated_server["database"]) as source:
+        source.execute("""INSERT INTO match_quality(account,match_id,date,patch,queue,champion,role,
+            identity_resolution,duration_minutes,win,explicit_afk,suspected_quasi_afk,early_surrender,
+            anomaly_flags,match_quality_score,loss_attribution_weight,win_evidence_weight,reason)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            ("A#EUW", "M1", "2026-10-01T00:00:00Z", "16.1", "420", "Ahri", "MIDDLE",
+             "puuid", 30.0, 1, 0, 0, 0, "", 1.0, 1.0, 1.0, ""))
+    original_connect = app.STORAGE.connect
+
+    class CommitFailure:
+        def __init__(self):
+            self.connection = original_connect()
+        def __getattr__(self, name):
+            return getattr(self.connection, name)
+        def commit(self):
+            raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(app.STORAGE, "connect", CommitFailure)
+    payload = {
+        "match_id": "M1", "invincible": False, "carryable_loss": False,
+        "afk_player": False, "griefer": False, "team_collapse": False,
+        "manual_label": "", "note": "private note", "confidence": 0.5,
+        "expected_revision": None,
+    }
+    status, headers, body = request(isolated_server, "POST", "/api/annotations", payload=payload)
+    assert status == 503
+    assert headers["content-type"] == "application/json; charset=utf-8"
+    assert "private note" not in body.decode()
+    with sqlite3.connect(isolated_server["database"]) as source:
+        assert source.execute("SELECT COUNT(*) FROM match_annotations").fetchone()[0] == 0
+
+
+def test_sync_api_adds_redacted_durable_outcomes_preserving_legacy_fields(isolated_server):
+    from sync_runs import SyncRun
+    with SyncRun(app.STORAGE, "incremental", ["private-A", "private-B"]) as run:
+        run.complete_account("private-A", {"inserted": 2})
+        run.fail_account("private-B", RuntimeError("private-error-credentials"))
+    status, _, body = request(isolated_server, "GET", "/api/sync-status")
+    payload = json.loads(body)
+    assert status == 200
+    assert payload["mode"] == "snapshot"
+    assert payload["last_completed_at"] is None
+    assert not payload["automatic_api_calls"]
+    last = payload["recent_runs"][0]
+    assert last["status"] == "partial"
+    assert last["completed_accounts"] == 1
+    assert last["failed_accounts"] == 1
+    assert last["counts"] == {"inserted": 2}
+    assert "private-" not in body.decode()
+
+
+def test_disconnected_client_during_error_response_does_not_escape_or_leak_driver_text(caplog):
+    class DisconnectedHandler:
+        path = "/api/champions?account=private-puuid"
+        command = "GET"
+        close_connection = False
+        def _send_json_error(self, status, message):
+            self._response_status = status
+            raise BrokenPipeError("private transport text")
+
+    def fail(_handler):
+        raise sqlite3.OperationalError("private credentials and query")
+
+    handler = DisconnectedHandler()
+    app.api_operation(fail)(handler)
+    assert handler.close_connection
+    assert handler._response_status == 500
+    assert "private" not in caplog.text
+    events = [json.loads(record.message) for record in caplog.records]
+    assert events[-1]["outcome"] == "failed"
 
 
 def test_api_head_uses_the_api_before_static_fallback(isolated_server):

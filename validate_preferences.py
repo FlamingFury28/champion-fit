@@ -23,6 +23,7 @@ import sys
 from typing import Any
 
 from champion_taxonomy import canonical_champion, champion_entry
+from validate_algorithm_settings import _utc_sort_value
 
 
 PROTOCOL_VERSION = "observed-preference-next-choice-v2"
@@ -97,6 +98,10 @@ def load_observations(db_path: Path) -> tuple[list[Observation], dict[str, objec
     try:
         connection.execute("PRAGMA query_only=ON")
         connection.execute("BEGIN")
+        connection.create_function(
+            "validation_utc", 1,
+            lambda value: _utc_sort_value(str(value or "").strip()), deterministic=True,
+        )
         identity_account: dict[str, str] = {}
         direct_identity: dict[str, str] = {}
         puuid_identity: dict[str, str] = {}
@@ -145,10 +150,10 @@ def load_observations(db_path: Path) -> tuple[list[Observation], dict[str, objec
 
         rows = connection.execute(
             """WITH global_match_time AS (
-                   SELECT match_id,MIN(date) occurred_at
+                   SELECT match_id,MIN(validation_utc(date)) occurred_at
                    FROM match_quality GROUP BY match_id
                )
-               SELECT m.account,m.match_id,t.occurred_at,m.patch,m.queue,
+               SELECT m.account,m.match_id,m.date,t.occurred_at,m.patch,m.queue,
                       m.champion,m.role,m.duration_minutes,m.win
                FROM match_quality m
                JOIN global_match_time t ON t.match_id=m.match_id
@@ -185,8 +190,11 @@ def load_observations(db_path: Path) -> tuple[list[Observation], dict[str, objec
                 identity_group = identity
             try:
                 win = int(row["win"])
+                # One malformed source must not erase another account's valid
+                # observation of the same match, nor inherit its timestamp.
+                _utc(row["date"])
                 occurred_at = _utc(row["occurred_at"])
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 excluded_context += 1
                 continue
             if win not in {0, 1}:

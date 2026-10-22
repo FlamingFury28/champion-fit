@@ -2,7 +2,7 @@ import { queryOptions } from '@tanstack/react-query'
 import { getJson, scopeQuery, type ScopeSnapshot } from './client'
 
 export type PlaystyleDays = '90' | '180' | '365' | 'all'
-export interface PlaystyleFilters { role?: string; queue?: string; days: PlaystyleDays; category?: string }
+export interface PlaystyleFilters { role?: string; queue?: string; days: string; category?: string }
 export type PlaystyleSource = string | { label?: string; name?: string; url?: string }
 export interface PlaystyleCategoryDefinition {
   id: string; label: string; kind: string; criteria: string | string[]; roles: string[]; sources: PlaystyleSource[]
@@ -10,6 +10,7 @@ export interface PlaystyleCategoryDefinition {
 export interface PlaystyleSupport { games: number; baseline_games: number; local_missing?: boolean }
 export interface PlaystyleComposition { champion: string; name: string; games: number; wins: number; losses: number; reason?: string }
 export interface PlaystyleCategory extends PlaystyleCategoryDefinition {
+  credible_mass?: number
   games: number; observations: number; wins: number; losses: number
   mean: number | null; lower?: number | null; upper?: number | null; lower_90?: number | null; upper_90?: number | null
   baseline_mean: number | null; baseline_lower?: number | null; baseline_upper?: number | null; baseline_lower_90?: number | null; baseline_upper_90?: number | null
@@ -34,14 +35,14 @@ export interface PlaystylesResponse {
   behavior: PlaystyleBehavior[]
   suggestions: {
     category_id: string | null; exploratory: boolean
-    played: { champion: string; name: string; games: number; wins: number; losses: number; mean: number | null; lower?: number | null; upper?: number | null; lower_90?: number | null; upper_90?: number | null }[]
+    played: { champion: string; name: string; games: number; wins: number; losses: number; mean: number | null; lower?: number | null; upper?: number | null; lower_90?: number | null; upper_90?: number | null; credible_mass?: number }[]
     untried: { champion: string; name: string; similarity: number; label: string; roles: string[] }[]
   }
   notes: string[]
 }
 export interface PlaystyleEvidenceResponse {
   category_id: string; page: number; page_size: number; total: number
-  matches: { account: string; match_id: string; champion: string; role: string; queue: string; date: string; win: number | boolean; note: string; duration_minutes: number }[]
+  matches: { account: string; match_id: string; champion: string; role: string; queue: string; date: string; date_utc?: string | null; win: number | boolean; note: string; duration_minutes: number }[]
 }
 
 export const playstyleQueryKeys = {

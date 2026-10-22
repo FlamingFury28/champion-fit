@@ -1,11 +1,14 @@
 import { useQuery } from '@tanstack/react-query'
 import { ArrowRight } from 'lucide-react'
-import { Link, useSearchParams } from 'react-router'
+import { useState } from 'react'
+import { Link, useLocation, useSearchParams } from 'react-router'
 import { trainingPlanQuery } from '../api/queries'
-import { clampInteger, normalizeRole, ROLES, pct } from '../app/filters'
+import { ROLES, pct } from '../app/filters'
+import { PLAN_QUEUES as queues, useCompetitivePlanFilters } from '../app/competitive-plan-filters'
 import { queueLabel, roleLabel } from '../app/labels'
 import { championHref } from '../app/navigation'
 import { useScope } from '../app/scope'
+import { TrainingProgress } from '../components/TrainingProgress'
 import { ChampionAvatar, DataTable, DecisionSummary, EmptyState, ErrorState, FilterBar, MetricCard, PageHeader, QueryResults, Skeleton, StatusBadge, Surface } from '../components/ui'
 
 const playableRoles = ROLES.filter((role) => role !== 'ALL')
@@ -17,23 +20,32 @@ function periodLabel(days: unknown) {
 
 export function CompetitivePlanPage({ embedded = false }: { embedded?: boolean }) {
   const { scope, scopeReady } = useScope()
-  const [params, setParams] = useSearchParams()
-  const explicitRole = params.get('role') ?? ''
-  const role = params.has('role') ? normalizeRole(explicitRole) : undefined
-  const queue = params.get('queue') ?? ''
-  const days = params.get('days') ?? ''
-  const budgetParam = params.get('budget') ?? params.get('n')
-  const budget = clampInteger(budgetParam, 20, 2000, 400)
+  const [params] = useSearchParams()
+  const { filters: remembered, updateFilters, storageAvailable } = useCompetitivePlanFilters()
+  const location = useLocation()
+  const role = remembered.role || undefined
+  const queue = remembered.queue
+  const queueKnown = queue === '' || queue === 'all' || queues.includes(queue)
+  const days = remembered.days
+  const daysKnown = days === '' || ['90', '180', '365', 'all'].includes(days)
+  const budget = Number(remembered.budget)
+  const [budgetInput, setBudgetInput] = useState({ locationKey: location.key, value: String(budget) })
+  if (budgetInput.locationKey !== location.key) setBudgetInput({ locationKey: location.key, value: String(budget) })
+  const budgetDraft = budgetInput.locationKey === location.key ? budgetInput.value : String(budget)
   const filters = { queue: queue || undefined, days: days || undefined }
   const result = useQuery({ ...trainingPlanQuery(scope, budget, role, filters), enabled: scopeReady })
   const data = result.data
-  const update = (key: string, value: string) => setParams((current) => {
-    const next = new URLSearchParams(current)
-    if (value) next.set(key, value)
-    else next.delete(key)
-    return next
-  }, { replace: true })
+  const update = (key: keyof typeof remembered, value: string) => updateFilters({ [key]: value })
   const accountsLabel = scope.accounts.length ? scope.accounts.join(', ') : 'tutti gli account attivi'
+  const commitBudget = () => {
+    const numericDraft = budgetDraft.trim() ? Number(budgetDraft) : Number.NaN
+    const committed = Number.isFinite(numericDraft)
+      ? Math.min(2000, Math.max(20, Math.trunc(numericDraft)))
+      : budget
+    setBudgetInput({ locationKey: location.key, value: String(committed) })
+    if (committed === budget) return
+    update('budget', String(committed))
+  }
   const context = data?.context ?? {}
   const items = [...(data?.items ?? [])].sort((left, right) => right.allocation_games - left.allocation_games
     || (right.posterior_win_rate ?? 0) - (left.posterior_win_rate ?? 0)
@@ -41,21 +53,23 @@ export function CompetitivePlanPage({ embedded = false }: { embedded?: boolean }
   const first = items.find((item) => item.allocation_games > 0) ?? items[0]
 
   return <div className="page-stack">
-    <PageHeader level={embedded ? 2 : 1} eyebrow="Campioni / Piano competitivo" title="Piano da 400 partite" copy="Distribuisci un budget per capire quale campione può diventare la scelta migliore. Il piano confronta candidati promettenti con il miglior riferimento storico disponibile." aside={result.isFetching && data ? <StatusBadge tone="info">Ricalcolo</StatusBadge> : undefined} />
+    <PageHeader level={embedded ? 2 : 1} eyebrow="Campioni / Piano competitivo" title={`Piano da ${budget} partite`} copy="Distribuisci un budget per capire quale campione può diventare la scelta migliore. Il piano confronta candidati promettenti con il miglior riferimento storico disponibile." aside={result.isFetching && data ? <StatusBadge tone="info">Ricalcolo</StatusBadge> : undefined} />
 
     <DecisionSummary
-      answer={first ? `Parti da ${first.champion} · ${roleLabel(first.role)}` : 'Nessun candidato nel contesto selezionato'}
-      detail={data?.model?.message ?? 'Il piano usa una simulazione gerarchica e resta esplorativo finché non supera la validazione temporale.'}
-      status={data?.model?.validated ? 'Modello convalidato' : 'Piano esplorativo'}
-      tone={data?.model?.validated ? 'positive' : 'warning'}
+      answer={result.isPending ? 'Sto calcolando il piano competitivo' : result.isError ? 'Il piano competitivo non è disponibile' : first ? `Anteprima: più partite su ${first.champion} · ${roleLabel(first.role)}` : 'Nessun candidato nel contesto selezionato'}
+      detail={result.isPending ? 'Il risultato sarà disponibile al termine del calcolo.' : result.isError ? 'Riprova il caricamento mantenendo il contesto selezionato.' : data?.model?.message ?? 'Il piano usa una simulazione gerarchica e resta esplorativo finché non supera la validazione temporale.'}
+      status={result.isPending ? 'Calcolo in corso' : result.isError ? 'Errore di caricamento' : !first ? 'Contesto senza candidati' : data?.model?.validated ? 'Modello convalidato' : 'Piano esplorativo'}
+      tone={result.isError ? 'negative' : result.isPending ? 'info' : data?.model?.validated && first ? 'positive' : 'warning'}
     />
 
+    <TrainingProgress plan={data} scope={scope} filters={{ budget, role, ...filters }} ready={scopeReady && !result.isFetching && !result.isError} refreshPreview={() => void result.refetch()} />
+
     <FilterBar>
-      <div className="filter-bar__intro"><strong>Budget e contesto</strong><span>Account attivi: {accountsLabel}. Il budget è il totale di partite da distribuire.</span></div>
-      <label>Partite<input aria-label="Budget partite" type="number" min={20} max={2000} step={1} value={budget} onChange={(event) => update('budget', String(clampInteger(event.target.value, 20, 2000, 400)))} /></label>
-      <label>Ruolo<select value={explicitRole} onChange={(event) => update('role', event.target.value)}><option value="">Automatico</option><option value="ALL">Tutti i ruoli</option>{playableRoles.map((value) => <option key={value} value={value}>{roleLabel(value)}</option>)}</select></label>
-      <label>Modalità<select value={queue} onChange={(event) => update('queue', event.target.value)}><option value="">Predefinita</option><option value="all">Tutte le modalità</option>{['420', '440', '400', '430', '490', '480', '700'].map((value) => <option key={value} value={value}>{queueLabel(value)}</option>)}</select></label>
-      <label>Periodo<select value={days} onChange={(event) => update('days', event.target.value)}><option value="">Predefinito</option><option value="90">90 giorni</option><option value="180">180 giorni</option><option value="365">365 giorni</option><option value="all">Tutto lo storico</option></select></label>
+      <div className="filter-bar__intro"><strong>Budget e contesto</strong><span>Account attivi: {accountsLabel}. {storageAvailable ? 'Le modifiche a budget e filtri vengono ricordate in questo browser. Il budget viene riusato anche nel Riepilogo.' : 'Il browser non consente di ricordare le selezioni: conserva il link.'}</span></div>
+      <label>Partite<input aria-label="Budget partite" type="number" min={20} max={2000} step={1} value={budgetDraft} onChange={(event) => setBudgetInput({ locationKey: location.key, value: event.target.value })} onBlur={commitBudget} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commitBudget() } }} /></label>
+      <label>Ruolo<select value={role ?? ''} onChange={(event) => update('role', event.target.value)}><option value="">Automatico</option><option value="ALL">Tutti i ruoli</option>{playableRoles.map((value) => <option key={value} value={value}>{roleLabel(value)}</option>)}</select></label>
+      <label>Modalità<select value={queue} onChange={(event) => update('queue', event.target.value)}>{!queueKnown ? <option value={queue} disabled>Modalità del link</option> : null}<option value="">Predefinita</option><option value="all">Tutte le modalità</option>{queues.map((value) => <option key={value} value={value}>{queueLabel(value)}</option>)}</select></label>
+      <label>Periodo<select value={days} onChange={(event) => update('days', event.target.value)}>{!daysKnown ? <option value={days} disabled>Periodo del link</option> : null}<option value="">Predefinito</option><option value="90">90 giorni</option><option value="180">180 giorni</option><option value="365">365 giorni</option><option value="all">Tutto lo storico</option></select></label>
       <span className="filter-count" role="status">{data ? `${data.budget_assigned}/${data.budget_total} partite assegnate` : `${budget} partite richieste`}</span>
     </FilterBar>
 
@@ -72,7 +86,7 @@ export function CompetitivePlanPage({ embedded = false }: { embedded?: boolean }
 
       <QueryResults label="Piano per identificare il campione migliore" aria-busy={result.isFetching}>
         {items.length ? <DataTable label="Partite competitive assegnate per campione"><thead><tr><th>Campione</th><th>Ruolo</th><th>Partite osservate</th><th>Stima aggiustata</th><th>Segnale</th><th>Nuove partite</th><th>Account coinvolti</th><th>Dettaglio</th></tr></thead><tbody>{items.map((item) => {
-          const detail = championHref(item.champion, item.role, params)
+          const detail = championHref(item.champion, item.role, params, context)
           const signal = item.historical_supported
             ? { text: 'Vantaggio storico supportato', tone: 'warning' as const }
             : item.classification === 'promising'

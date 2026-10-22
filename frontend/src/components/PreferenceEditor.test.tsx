@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { queryKeys } from '../api/queries'
@@ -42,7 +42,7 @@ describe('PreferenceEditor', () => {
     const calls: Array<{ url: string; init?: RequestInit }> = []
     const { user } = setup((input, init) => {
       calls.push({ url: String(input), init })
-      return Promise.resolve(response(init?.method === 'POST' ? { revision: 5 } : { ...payload, revision: init?.method === 'POST' ? 5 : 4 }))
+      return Promise.resolve(response(init?.method === 'POST' ? { ok: true, revision: 5, items: [] } : { ...payload, revision: init?.method === 'POST' ? 5 : 4 }))
     })
     await screen.findByRole('option', { name: 'Zed' })
     await user.type(screen.getByLabelText('Cerca nel catalogo'), 'Zed')
@@ -61,7 +61,7 @@ describe('PreferenceEditor', () => {
     const calls: Array<{ url: string; init?: RequestInit }> = []
     const { user } = setup((input, init) => {
       calls.push({ url: String(input), init })
-      return Promise.resolve(response(init?.method === 'POST' ? { revision: 5 } : payload))
+      return Promise.resolve(response(init?.method === 'POST' ? { ok: true, revision: 5, items: [] } : payload))
     })
     const ledgerRegion = await screen.findByRole('region', { name: 'Registro delle preferenze dichiarate' })
     const ledger = within(ledgerRegion).getByRole('table')
@@ -77,7 +77,7 @@ describe('PreferenceEditor', () => {
     const calls: Array<{ url: string; init?: RequestInit }> = []
     const { user } = setup((input, init) => {
       calls.push({ url: String(input), init })
-      return Promise.resolve(response(init?.method === 'POST' ? { revision: 5 } : payload))
+      return Promise.resolve(response(init?.method === 'POST' ? { ok: true, revision: 5, items: [] } : payload))
     })
     await screen.findByRole('option', { name: 'Future Hero · senza classificazione' })
     await user.selectOptions(screen.getByLabelText('Campione della preferenza'), 'Future Hero')
@@ -95,7 +95,7 @@ describe('PreferenceEditor', () => {
   })
 
   it('invalida anche i registri in cache di altri scope dopo un salvataggio', async () => {
-    const { user, client } = setup((_input, init) => Promise.resolve(response(init?.method === 'POST' ? { revision: 5 } : payload)))
+    const { user, client } = setup((_input, init) => Promise.resolve(response(init?.method === 'POST' ? { ok: true, revision: 5, items: [] } : payload)))
     const otherScope = { accounts: ['Gamma#EUW'], companion: null }
     const otherKey = queryKeys.recommendationFeedback(otherScope)
     client.setQueryData(otherKey, { ...payload, accounts: ['Gamma#EUW'], revision: 4 })
@@ -153,5 +153,97 @@ describe('PreferenceEditor', () => {
     rerender(<QueryClientProvider client={client}><PreferenceEditor scope={{ accounts: ['Beta#EUW'], companion: null }} /></QueryClientProvider>)
     expect(screen.queryByRole('option', { name: 'Zed' })).not.toBeInTheDocument()
     expect(screen.getByRole('status', { name: 'Caricamento delle preferenze' })).toBeVisible()
+  })
+
+  it('conserva un destinatario escluso dopo il refetch e permette di sceglierlo prima di salvare', async () => {
+    let current = payload
+    const posts: unknown[] = []
+    const { user, client } = setup((_input, init) => {
+      if (init?.method === 'POST') {
+        posts.push(JSON.parse(String(init.body)))
+        return Promise.resolve(response({ ok: true, revision: 10, items: [] }))
+      }
+      return Promise.resolve(response(current))
+    })
+    await screen.findByRole('option', { name: 'Ahri' })
+    await user.selectOptions(screen.getByLabelText('Campione della preferenza'), 'Ahri')
+    await user.click(screen.getByText('Account · 2/2 selezionati'))
+    await user.click(screen.getByRole('checkbox', { name: 'Beta#EUW' }))
+
+    current = { ...payload, revision: 9, accounts: ['Beta#EUW'], suspended_accounts: ['Alpha#EUW'] }
+    await act(async () => { await client.refetchQueries({ queryKey: queryKeys.recommendationFeedback(scope) }) })
+    expect(await screen.findByText('Account · 0/1 selezionati')).toBeVisible()
+    expect(screen.getByLabelText('Campione della preferenza')).toHaveValue('Ahri')
+    expect(screen.getByRole('checkbox', { name: 'Beta#EUW' })).not.toBeChecked()
+    expect(screen.queryByRole('checkbox', { name: 'Alpha#EUW' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Si applica a Beta#EUW.')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Ruolo della preferenza')).toBeDisabled()
+    expect(screen.getByRole('button', { name: /^Mi piace$/ })).toBeDisabled()
+    expect(posts).toEqual([])
+
+    await user.click(screen.getByRole('checkbox', { name: 'Beta#EUW' }))
+    expect(screen.getByText('Account · 1/1 selezionati')).toBeVisible()
+    expect(screen.getByLabelText('Ruolo della preferenza')).toHaveValue('MIDDLE')
+    await user.click(screen.getByRole('button', { name: /^Mi piace$/ }))
+    await waitFor(() => expect(posts).toEqual([{
+      accounts: ['Beta#EUW'], champion: 'Ahri', role: 'MIDDLE', preference: 'like', expected_revision: 9,
+    }]))
+  })
+
+  it('mantiene la selezione esplicita compatibile quando resta un solo account', async () => {
+    let current = payload
+    const posts: unknown[] = []
+    const { user, client } = setup((_input, init) => {
+      if (init?.method === 'POST') {
+        posts.push(JSON.parse(String(init.body)))
+        return Promise.resolve(response({ ok: true, revision: 10, items: [] }))
+      }
+      return Promise.resolve(response(current))
+    })
+    await screen.findByRole('option', { name: 'Ahri' })
+    await user.selectOptions(screen.getByLabelText('Campione della preferenza'), 'Ahri')
+    await user.click(screen.getByText('Account · 2/2 selezionati'))
+    await user.click(screen.getByRole('checkbox', { name: 'Beta#EUW' }))
+
+    current = { ...payload, revision: 9, accounts: ['Alpha#EUW'], suspended_accounts: ['Beta#EUW'] }
+    await act(async () => { await client.refetchQueries({ queryKey: queryKeys.recommendationFeedback(scope) }) })
+    expect(await screen.findByText('Account · 1/1 selezionati')).toBeVisible()
+    expect(screen.getByRole('checkbox', { name: 'Alpha#EUW' })).toBeChecked()
+    expect(screen.getByLabelText('Ruolo della preferenza')).toHaveValue('MIDDLE')
+    expect(screen.getByRole('button', { name: /^Mi piace$/ })).toBeEnabled()
+    await user.click(screen.getByRole('button', { name: /^Mi piace$/ }))
+    await waitFor(() => expect(posts).toEqual([{
+      accounts: ['Alpha#EUW'], champion: 'Ahri', role: 'MIDDLE', preference: 'like', expected_revision: 9,
+    }]))
+  })
+
+  it('gestisce zero account e conserva le esclusioni quando un destinatario torna disponibile', async () => {
+    let current = payload
+    const posts: unknown[] = []
+    const { user, client } = setup((_input, init) => {
+      if (init?.method === 'POST') posts.push(JSON.parse(String(init.body)))
+      return Promise.resolve(response(init?.method === 'POST' ? { ok: true, revision: 10, items: [] } : current))
+    })
+    await screen.findByRole('option', { name: 'Ahri' })
+    await user.selectOptions(screen.getByLabelText('Campione della preferenza'), 'Ahri')
+    await user.click(screen.getByText('Account · 2/2 selezionati'))
+    await user.click(screen.getByRole('checkbox', { name: 'Beta#EUW' }))
+
+    current = { ...payload, revision: 8, accounts: [], suspended_accounts: [...scope.accounts] }
+    await act(async () => { await client.refetchQueries({ queryKey: queryKeys.recommendationFeedback(scope) }) })
+    expect(await screen.findByText('Non ci sono account attivi a cui applicare la preferenza.')).toBeVisible()
+    expect(screen.queryByText(/Account · .* selezionati/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Ruolo della preferenza')).toBeDisabled()
+    expect(screen.getByRole('button', { name: /^Mi piace$/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /^Non fa per me$/ })).toBeDisabled()
+
+    current = { ...payload, revision: 9, accounts: ['Beta#EUW'], suspended_accounts: ['Alpha#EUW'] }
+    await act(async () => { await client.refetchQueries({ queryKey: queryKeys.recommendationFeedback(scope) }) })
+    expect(await screen.findByText('Account · 0/1 selezionati')).toBeVisible()
+    await user.click(screen.getByText('Account · 0/1 selezionati'))
+    expect(screen.getByRole('checkbox', { name: 'Beta#EUW' })).not.toBeChecked()
+    expect(screen.getByRole('button', { name: /^Mi piace$/ })).toBeDisabled()
+    expect(posts).toEqual([])
   })
 })

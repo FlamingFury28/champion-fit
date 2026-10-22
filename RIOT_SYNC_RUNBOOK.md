@@ -68,6 +68,12 @@ Lo script interroga gli ID più recenti a pagine da 100 e si ferma alla prima pa
 
 Non avviare due sincronizzazioni concorrenti sullo stesso database. Lo script applica un intervallo per chiave e il client Riot gestisce i retry; richieste manuali sovrapposte aggiungono carico e rendono più difficile capire l'esito.
 
+Il controllo dei dettagli storici esegue tre letture per gruppi di massimo 400 ID, conservando le regole di recupero e di identità. Le sincronizzazioni incrementali, storiche e la rielaborazione effettiva registrano gli esiti in `riot_sync_runs` e `riot_sync_run_accounts`. I risultati per account vengono confermati nella stessa transazione dei fatti; il registro distingue completamento, importazione parziale, fallimento e interruzione. Il dry-run resta in sola lettura.
+
+`GET /api/sync-status` aggiunge `recent_runs`, con esiti e contatori aggregati senza nomi degli account; mantiene i campi precedenti. `last_completed_at` conserva il significato storico dell'ultimo aggiornamento dei dati e non certifica da solo il successo dell'intero run. Per quel controllo usare lo stato del registro. Un processo terminato forzatamente può lasciare un run `running`: confrontarlo con il marker recente e `sync_active`, senza considerarlo completato. `KeyboardInterrupt` viene invece registrato come `interrupted`.
+
+I log diagnostici JSON usano il run ID per correlare i tempi. I riepiloghi CLI locali mantengono gli account per consentire il controllo dell'ambito e richiedono la redazione degli identificativi prima di essere condivisi. La migrazione `--scope riot` trasferisce anche il registro, in ordine di dipendenza padre/figlio.
+
 ## Prima importazione e rielaborazione locale
 
 La prima importazione completa è l'unico caso ordinario per `riot_sync.py`:
@@ -113,21 +119,21 @@ Non rilanciare ripetutamente il comando mentre attende, non aumentare la concorr
 
 Leggere il JSON di `check_new_matches.py` per account. I conteggi rilevanti includono `recent_ids`, `new_ids`, `retried_raw`, `inserted`, `removed_stale` e gli elenchi `unresolved`/`identity_conflicts`; il riepilogo aggregato mostra anche quanti account sono stati controllati. `new_ids` è un conteggio, non l'elenco degli ID. Non trattare `fetched_at` come data dell'ultima partita: indica quando è stato acquisito il dato.
 
-La data effettivamente importata è `MAX(match_quality.date)` per l'account e il perimetro selezionato. Per controllarla senza stampare il Riot ID, valorizzare `CF_SYNC_ACCOUNT` soltanto nella shell locale e usare lo stesso file passato a `--db`:
+La data effettivamente importata si ricava confrontando gli istanti UTC validi di `match_quality.date` per l'account. L'esempio usa tutto lo storico; eventuali filtri attivi nell'app devono essere considerati nel confronto. Per controllarla senza stampare il Riot ID, valorizzare `CF_SYNC_ACCOUNT` soltanto nella shell locale e usare lo stesso file passato a `--db`:
 
 ```powershell
 $env:CF_SYNC_DB = (Resolve-Path .\champion_fit.db).Path
 # CF_SYNC_ACCOUNT: valorizzare localmente, senza inserirlo in uno script versionato.
-python -c "import os,sqlite3,pathlib; uri=pathlib.Path(os.environ['CF_SYNC_DB']).resolve().as_uri()+'?mode=ro'; c=sqlite3.connect(uri,uri=True); rows=c.execute('SELECT match_id,date FROM match_quality WHERE account=? ORDER BY date DESC,match_id DESC LIMIT 5',(os.environ['CF_SYNC_ACCOUNT'],)).fetchall(); print({'last_imported_date': rows[0][1] if rows else None, 'latest_imported_matches': rows})"
+python -c "import os,sqlite3,pathlib; from analysis_runtime import parse_time; uri=pathlib.Path(os.environ['CF_SYNC_DB']).resolve().as_uri()+'?mode=ro'; c=sqlite3.connect(uri,uri=True); values=[(parse_time(date),match_id,date) for match_id,date in c.execute('SELECT match_id,date FROM match_quality WHERE account=?',(os.environ['CF_SYNC_ACCOUNT'],))]; latest=sorted((item for item in values if item[0] is not None),key=lambda item:(item[0],item[1]),reverse=True)[:5]; print({'last_imported_date':latest[0][2] if latest else None,'last_imported_utc':latest[0][0].isoformat() if latest else None,'latest_imported_matches':[(item[1],item[2]) for item in latest],'invalid_dates':sum(item[0] is None for item in values)})"
 ```
 
 Confrontare gli ID recenti e il numero `new_ids` del riepilogo con le righe più recenti restituite dalla query. Un ID non ancora presente in `match_quality` non prova da solo un errore: la partita può essere fuori dalle code supportate, avere un payload invalido o restare in uno stato d'identità irrisolto. In tali casi esaminare gli stati di materializzazione nel database senza forzare l'identità.
 
-Per un confronto puntuale degli ID, impostare localmente `CF_RECENT_IDS` al valore `recent_ids` del risultato per l'account e usare il Riot ID già configurato in `CF_SYNC_ACCOUNT`. La query legge la lista raw più recente e mostra quali di quei match ID hanno una riga `match_quality`; l'output va trattato come dato personale locale e non salvato nei log:
+Per un confronto puntuale degli ID, impostare localmente `CF_RECENT_IDS` al valore `recent_ids` del risultato per l'account e usare il Riot ID già configurato in `CF_SYNC_ACCOUNT`. La query legge la lista raw con l'istante di acquisizione valido più recente e mostra quali di quei match ID hanno una riga `match_quality`; segnala anche i timestamp non validi. L'output va trattato come dato personale locale e non salvato nei log:
 
 ```powershell
 # CF_RECENT_IDS: valorizzare localmente con il conteggio recent_ids del risultato.
-python -c "import os,sqlite3,pathlib,json; uri=pathlib.Path(os.environ['CF_SYNC_DB']).resolve().as_uri()+'?mode=ro'; c=sqlite3.connect(uri,uri=True); account=os.environ['CF_SYNC_ACCOUNT']; row=c.execute('SELECT match_ids_json FROM riot_match_list_raw WHERE account=? ORDER BY fetched_at DESC LIMIT 1',(account,)).fetchone(); ids=(json.loads(row[0]) if row else [])[:int(os.environ['CF_RECENT_IDS'])]; materialized={r[0] for r in c.execute('SELECT match_id FROM match_quality WHERE account=?',(account,))}; print({'recent_ids':ids,'materialized_ids':sorted(set(ids)&materialized),'missing_ids':sorted(set(ids)-materialized)})"
+python -c "import os,sqlite3,pathlib,json; from analysis_runtime import parse_time; uri=pathlib.Path(os.environ['CF_SYNC_DB']).resolve().as_uri()+'?mode=ro'; c=sqlite3.connect(uri,uri=True); account=os.environ['CF_SYNC_ACCOUNT']; values=[(parse_time(at),at,body,puuid) for at,body,puuid in c.execute('SELECT fetched_at,match_ids_json,puuid FROM riot_match_list_raw WHERE account=?',(account,))]; latest=max((item for item in values if item[0] is not None),key=lambda item:(item[0],item[3]),default=None); ids=(json.loads(latest[2]) if latest else [])[:int(os.environ['CF_RECENT_IDS'])]; materialized={r[0] for r in c.execute('SELECT match_id FROM match_quality WHERE account=?',(account,))}; print({'latest_list_fetched_at':latest[1] if latest else None,'recent_ids':ids,'materialized_ids':sorted(set(ids)&materialized),'missing_ids':sorted(set(ids)-materialized),'invalid_list_timestamps':sum(item[0] is None for item in values)})"
 ```
 
 Nell'app selezionare gli stessi account e filtri in **Dati usati** e controllare **Le mie partite**. La data visibile deve coincidere con il massimo della data importata nel medesimo perimetro; account non selezionati o filtri di periodo/coda possono mostrare una data precedente. Ricaricare completamente l'app dopo la sincronizzazione per svuotare eventuali risultati mantenuti nel browser. Se SQL e interfaccia non coincidono, verificare prima che entrambi puntino allo stesso database e usino lo stesso perimetro.

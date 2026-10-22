@@ -6,10 +6,11 @@ subtracting summed tag totals. Search and display order never enter inference.
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import math
 
 from algorithm_settings import current_settings
+from analysis_runtime import parse_time, subtract_days_clamped
 from champion_taxonomy import canonical_champion, champion_categories, champion_entry, load_catalog
 from observed_performance import observed_performance
 
@@ -73,16 +74,27 @@ def resolve_filters(rows, params, now=None):
     queue = "all" if raw_queue.casefold() == "all" else canonical_queue(raw_queue)
     if role and role not in {"ALL", *ROLES}:
         raise ValueError("Ruolo non valido.")
-    now = now or datetime.now(timezone.utc)
-    cutoff = None if days == "all" else (now - timedelta(days=int(days))).date().isoformat()
+    reference = now if now is not None else params.get("as_of", [None])[0]
+    now = parse_time(reference) or datetime.now(timezone.utc)
+    cutoff = (subtract_days_clamped(now, int(days)).replace(hour=0, minute=0, second=0, microsecond=0)
+              if days != "all" else None)
     # Queue and period defaults come from the algorithm configuration. An
     # omitted or blank role aggregates every role; an explicit role or queue is
     # retained even when it produces an empty scope.
     pairs = Counter((row["role"], row["queue"]) for row in rows if row["role"] in ROLES)
     filters = {"role": role or "ALL", "queue": queue, "days": days}
-    scoped = [row for row in rows if (filters["role"] == "ALL" or row["role"] == filters["role"])
-              and (filters["queue"] == "all" or row["queue"] == filters["queue"])
-              and (cutoff is None or str(row.get("date") or "")[:10] >= cutoff)]
+    scoped = []
+    for row in rows:
+        if row["role"] not in ROLES:
+            continue
+        if filters["role"] != "ALL" and row["role"] != filters["role"]:
+            continue
+        if filters["queue"] != "all" and row["queue"] != filters["queue"]:
+            continue
+        when = parse_time(row.get("date"))
+        if when is None or when > now or (cutoff is not None and when < cutoff):
+            continue
+        scoped.append({**row, "date_utc": when.isoformat(timespec="microseconds")})
     return filters, {"roles": list(ROLES),
                      "queues": [{"id": key, "label": QUEUE_LABELS.get(key, key)}
                                 for key in sorted(set(QUEUE_LABELS) | {r["queue"] for r in rows})],
@@ -359,7 +371,7 @@ def evidence(rows, params, now=None):
     page = max(1, int(params.get("page", ["1"])[0]))
     page_size = min(100, max(1, int(params.get("page_size", ["20"])[0])))
     matches = [r for r in scoped if category in champion_categories(r["champion"])]
-    matches.sort(key=lambda r: (str(r.get("date") or ""), r["match_id"], r["account"]), reverse=True)
-    fields = ("account", "match_id", "champion", "role", "queue", "date", "win", "note", "duration_minutes")
+    matches.sort(key=lambda r: (r["date_utc"], r["match_id"], r["account"]), reverse=True)
+    fields = ("account", "match_id", "champion", "role", "queue", "date", "date_utc", "win", "note", "duration_minutes")
     return {"category_id": category, "page": page, "page_size": page_size, "total": len(matches),
             "matches": [{key: r.get(key) for key in fields} for r in matches[(page - 1) * page_size:page * page_size]]}

@@ -14,7 +14,13 @@ outputs/
 !.env.example
 frontend/node_modules/
 frontend/dist/
+frontend/dist-staging/
 frontend/coverage/
 frontend/playwright-report/
 frontend/test-results/
+frontend/e2e/
+frontend/tsconfig.e2e.json
+frontend/src/**/*.test.*
+frontend/src/**/*.spec.*
+frontend/src/test/
 test_*.py

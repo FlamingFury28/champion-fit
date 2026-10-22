@@ -2,12 +2,36 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  test:
+  backend-postgres:
+    name: Backend / PostgreSQL
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: champion_fit_test
+          POSTGRES_USER: champion_fit_test
+          POSTGRES_PASSWORD: champion_fit_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U champion_fit_test -d champion_fit_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
 
     steps:
       - name: Check out repository
@@ -26,7 +50,28 @@ jobs:
           python -m pip install -r requirements.txt pytest
 
       - name: Run Python tests
-        run: python -m pytest -q
+        env:
+          CHAMPION_FIT_TEST_POSTGRES_DSN: postgresql://champion_fit_test:champion_fit_ci@127.0.0.1:5432/champion_fit_test
+        run: python scripts/verify_project.py --scope backend
+
+  frontend-sqlite:
+    name: Frontend / SQLite / container
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements.txt
 
       - name: Set up Node.js 24
         uses: actions/setup-node@v6
@@ -39,21 +84,12 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      - name: Lint frontend
+      - name: Audit frontend dependencies
         working-directory: frontend
-        run: npm run lint
+        run: npm audit --audit-level=high
 
-      - name: Type-check frontend
-        working-directory: frontend
-        run: npm run typecheck
-
-      - name: Run frontend unit tests
-        working-directory: frontend
-        run: npm run test:unit
-
-      - name: Build frontend
-        working-directory: frontend
-        run: npm run build
+      - name: Verify frontend with the shared local command
+        run: python scripts/verify_project.py --scope frontend
 
       - name: Install Playwright browsers
         working-directory: frontend
@@ -61,7 +97,7 @@ jobs:
 
       - name: Run Playwright tests
         working-directory: frontend
-        run: npm run test:e2e
+        run: npx playwright test
 
       - name: Build production container
         run: docker build --tag champion-fit:ci .
@@ -86,11 +122,103 @@ jobs:
           done
           exit 1
 
-      - name: Upload test artifacts on failure
+      - name: Upload SQLite browser artifacts on failure
         if: ${{ failure() }}
         uses: actions/upload-artifact@v4
         with:
-          name: test-artifacts
+          name: sqlite-browser-artifacts
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  postgres-browser:
+    name: Browser / PostgreSQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: champion_fit_test
+          POSTGRES_USER: champion_fit_test
+          POSTGRES_PASSWORD: champion_fit_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U champion_fit_test -d champion_fit_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium firefox webkit
+
+      - name: Smoke-test browser flows on PostgreSQL
+        working-directory: frontend
+        env:
+          CHAMPION_FIT_E2E_POSTGRES_DSN: postgresql://champion_fit_test:champion_fit_ci@127.0.0.1:5432/champion_fit_test
+        run: >-
+          npx playwright test
+          e2e/navigation.spec.ts e2e/profile-companion.spec.ts e2e/preference-dates.spec.ts
+          e2e/recent-performance-dates.spec.ts e2e/account-metadata.spec.ts e2e/playstyle-dates.spec.ts
+          e2e/algorithm-settings-recovery.spec.ts e2e/algorithm-editor-recovery.spec.ts
+          e2e/algorithm-response-recovery.spec.ts
+          e2e/preference-account-recovery.spec.ts e2e/preference-mutations.spec.ts
+          e2e/recommendation-card-recovery.spec.ts
+          e2e/decision-regressions.spec.ts e2e/friend-calendar-filters.spec.ts
+          e2e/friend-keyboard-sort.spec.ts
+          e2e/responsive-menu-focus.spec.ts
+          e2e/role-filter-links.spec.ts
+          e2e/queue-filter-links.spec.ts
+          e2e/period-filter-links.spec.ts
+          e2e/role-transition-links.spec.ts
+          e2e/automatic-transition-links.spec.ts
+          e2e/synergy-period-links.spec.ts
+          e2e/synergy-queue-links.spec.ts
+          e2e/annotation-navigation.spec.ts e2e/annotation-acknowledgement.spec.ts
+          e2e/friend-group-identifiers.spec.ts e2e/friend-group-acknowledgement.spec.ts
+          e2e/friend-group-names.spec.ts e2e/toast-queue.spec.ts
+          e2e/remembered-budget.spec.ts
+          e2e/training-progress.spec.ts
+          --grep '@smoke'
+
+      - name: Upload PostgreSQL browser artifacts on failure
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: postgres-browser-artifacts
           path: |
             frontend/playwright-report/
             frontend/test-results/

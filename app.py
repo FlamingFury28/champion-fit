@@ -11,14 +11,16 @@ import os
 import socket
 import sqlite3
 import unicodedata
+from functools import wraps
 from datetime import date, datetime, timedelta, timezone
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
+from uuid import uuid4
 
 from match_scoring import LOSS_WEIGHT_MODEL_VERSION, loss_attribution_weight
-from storage import build_storage
+from storage import SQL_INTEGER_MAX, build_storage, postgres_table_columns
 from queue_rules import is_supported_queue
 from statistical_evidence import posterior_summary
 from decision_models import (
@@ -26,6 +28,7 @@ from decision_models import (
     rank_recommendations as statistical_rank_recommendations,
 )
 from algorithm_settings import current_settings
+from runtime_metrics import configure_logging, log_failure, measure, metrics_scope, record_metric
 
 
 APP_ROOT = Path(__file__).resolve().parent
@@ -78,25 +81,28 @@ def friend_last_game_from(params: dict[str, list[str]]) -> str:
     """Return a validated ISO date used as the minimum last-game date."""
     value = params.get("last_game_from", [""])[0].strip()
     try:
-        date.fromisoformat(value)
+        return date.fromisoformat(value).isoformat()
     except ValueError:
         return ""
-    return value
 
 
 def friend_games_from(params: dict[str, list[str]]) -> str:
     """Return the date from which shared games should be counted."""
     value = params.get("games_from", [""])[0].strip()
     try:
-        date.fromisoformat(value)
+        return date.fromisoformat(value).isoformat()
     except ValueError:
         return ""
-    return value
 
 
 def friend_result_limit(params: dict[str, list[str]]) -> int:
     """Return a larger result window when Friends filters are active."""
     return 10000 if friend_name_filter(params) or friend_last_game_from(params) or friend_games_from(params) else 100
+
+
+def friend_group_json_id(group_id: int) -> int | str:
+    """Preserve exact group IDs through browser JSON while ordinary IDs stay numeric."""
+    return str(group_id) if group_id > (2**53 - 1) else group_id
 
 
 def is_database_integrity_error(error: Exception) -> bool:
@@ -108,6 +114,92 @@ def is_database_integrity_error(error: Exception) -> bool:
     except ImportError:
         return False
     return isinstance(error, psycopg.IntegrityError)
+
+
+def backend_error_status(error: Exception) -> HTTPStatus:
+    """Only transient driver failures are retryable; query/schema bugs are 500."""
+    if isinstance(error, TimeoutError):
+        return HTTPStatus.SERVICE_UNAVAILABLE
+    if isinstance(error, sqlite3.DatabaseError):
+        code = getattr(error, "sqlite_errorcode", None)
+        if code is not None and (code & 0xff) in {
+            sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED, sqlite3.SQLITE_CANTOPEN,
+            sqlite3.SQLITE_IOERR, sqlite3.SQLITE_FULL, sqlite3.SQLITE_INTERRUPT,
+        }:
+            return HTTPStatus.SERVICE_UNAVAILABLE
+        if code is None and str(error).lower() in {
+            "database is locked", "database table is locked", "database is busy",
+            "unable to open database file",
+        }:
+            return HTTPStatus.SERVICE_UNAVAILABLE
+        return HTTPStatus.INTERNAL_SERVER_ERROR
+    try:
+        import psycopg
+    except ImportError:
+        return HTTPStatus.INTERNAL_SERVER_ERROR
+    if isinstance(error, getattr(psycopg, "Error", ())):
+        state = getattr(error, "sqlstate", None)
+        if ((state and (state.startswith(("08", "53")) or state in {
+            "40001", "40P01", "55P03", "57014", "57P01", "57P02", "57P03",
+        })) or (state is None and isinstance(error, getattr(psycopg, "OperationalError", ())))):
+            return HTTPStatus.SERVICE_UNAVAILABLE
+    return HTTPStatus.INTERNAL_SERVER_ERROR
+
+
+def api_operation(method):
+    """Contain API failures before headers, preserving existing domain responses."""
+    @wraps(method)
+    def guarded(self):
+        path = urlparse(self.path).path
+        if not path.startswith("/api/"):
+            return method(self)
+        self._response_status = None
+        self._request_id = uuid4().hex
+        resource = path.split("/")[2]
+        endpoint = f"/api/{resource}" if resource in {
+            "accounts", "algorithm-settings", "recommendation-feedback", "annotations",
+            "friend-groups", "sync-status", "overview", "profile", "champions", "champion",
+            "matches", "matchups", "synergy", "friends", "blacklist", "playstyles",
+            "playstyle-evidence", "training-plan", "training-progress", "exploration", "recommendations",
+            "recommendation-evidence", "plan", "screen",
+        } else "/api/unknown"
+        client_disconnected = False
+        with metrics_scope("http_api", request_id=self._request_id,
+                           method=self.command, endpoint=endpoint):
+            try:
+                return method(self)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                client_disconnected = True
+                record_metric("client_disconnect")
+                self.close_connection = True
+                return
+            except Exception as error:
+                log_failure(error, request_id=self._request_id, method=self.command, endpoint=endpoint)
+                if self._response_status is not None:
+                    self.close_connection = True
+                    return
+                self.close_connection = True
+                status = backend_error_status(error)
+                message = ("Servizio temporaneamente non disponibile. Riprova tra poco."
+                           if status == HTTPStatus.SERVICE_UNAVAILABLE else "Errore interno del servizio.")
+                try:
+                    self._send_json_error(status, message)
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                    # The original server error was already logged above.
+                    record_metric("client_disconnect")
+                    self.close_connection = True
+                except OSError as transport_error:
+                    # Do not let a disconnected client trigger a server traceback
+                    # containing the original driver's potentially sensitive text.
+                    log_failure(transport_error, request_id=self._request_id,
+                                method=self.command, endpoint=endpoint)
+                    self.close_connection = True
+            finally:
+                if self._response_status is not None:
+                    record_metric("http_status", self._response_status)
+                elif not client_disconnected:
+                    record_metric("http_status", 500)
+    return guarded
 
 
 def friend_sort_options(params: dict[str, list[str]]) -> list[tuple[str, bool]]:
@@ -448,6 +540,20 @@ def rows_to_dicts(cursor: sqlite3.Cursor) -> list[dict]:
     return [dict(row) for row in cursor.fetchall()]
 
 
+def _finite_duration_average(connection, average, where_sql, values):
+    """Recover nonnegative duration means when the SQL sum overflows."""
+    if average is None or math.isfinite(average):
+        return average
+    scale = connection.execute(
+        f"SELECT MAX(m.duration_minutes) value FROM match_quality m WHERE {where_sql}", values,
+    ).fetchone()["value"]
+    normalized = connection.execute(
+        f"SELECT AVG(m.duration_minutes / ?) value FROM match_quality m WHERE {where_sql}",
+        [scale, *values],
+    ).fetchone()["value"]
+    return round(scale * normalized, 1)
+
+
 def selected_accounts(params: dict[str, list[str]]) -> list[str]:
     """Read optional account filters without coupling the UI to the data source."""
     values = params.get("account", [])
@@ -461,6 +567,9 @@ def canonical_account_params(connection, params: dict[str, list[str]]) -> dict[s
     """Keep saved account and companion filters valid after a verified rename."""
     from account_identity import canonical_account_name
 
+    if any("\x00" in value for key in ("account", "companion_account")
+           for value in params.get(key, [])):
+        raise ValueError("Il filtro account contiene un carattere non valido")
     result = dict(params)
     for key in ("account", "companion_account"):
         if key in params:
@@ -552,6 +661,8 @@ def recommendation_evidence_data(
     limit: int, offset: int,
 ) -> dict:
     """Return the actual scoped observations used by a champion-role recommendation."""
+    from analysis_runtime import recent_match_sql
+    _, date_utc_sql, date_order_sql = recent_match_sql(connection)
     account_sql, account_values = account_filter(selected_accounts(params), "m.account")
     companion_sql, companion_values = companion_filter(params, "m.match_id")
     positive_sql, negative_sql, weight_sql = recommendation_evidence_expressions()
@@ -571,13 +682,13 @@ def recommendation_evidence_data(
     summary["positive_evidence"] = round(float(summary["positive_evidence"]), 2)
     summary["negative_evidence"] = round(float(summary["negative_evidence"]), 2)
     rows = rows_to_dicts(connection.execute(
-        f"""SELECT m.match_id, m.account, m.date, m.champion, m.role, m.win,
+        f"""SELECT m.match_id, m.account, m.date, {date_utc_sql} date_utc, m.champion, m.role, m.win,
             m.queue, m.duration_minutes, {weight_sql} evidence_weight,
             COALESCE(a.afk_player,0) annotation_afk,
             COALESCE(a.griefer,0) annotation_griefer,
             COALESCE(a.invincible,0) annotation_invincible
             {from_where}
-            ORDER BY m.date DESC, m.match_id ASC, m.account ASC LIMIT ? OFFSET ?""",
+            ORDER BY {date_order_sql} DESC, m.match_id ASC, m.account ASC LIMIT ? OFFSET ?""",
         [*values, limit, offset],
     ))
     for item in rows:
@@ -763,13 +874,7 @@ def load_match_participants(
 def migrate_match_participant_champions(connection, *, commit: bool = True) -> int:
     """Add canonical roster fields and backfill them from retained Riot payloads."""
     if STORAGE.engine == "postgres":
-        columns = {
-            row["column_name"]
-            for row in connection.execute(
-                "SELECT column_name FROM information_schema.columns "
-                "WHERE table_name='match_participants'"
-            )
-        }
+        columns = postgres_table_columns(connection, "match_participants")
     else:
         columns = {
             row["name"] for row in connection.execute("PRAGMA table_info(match_participants)")
@@ -1443,9 +1548,7 @@ def _query_with_settings(connection, path, params, snapshot):
         if path in {
             "/api/friends", "/api/matches", "/api/synergy", "/api/blacklist",
         }:
-            # These pages have no queue/date/role controls. Default them to the
-            # full analyzed history so the global outcome context cannot
-            # silently hide matches. Explicit API parameters can still narrow it.
+            # Start from the full history; explicit page filters can narrow it.
             analysis_params.setdefault("queue", ["all"])
             analysis_params.setdefault("days", ["all"])
             analysis_params.setdefault("role", ["ALL"])
@@ -1453,15 +1556,17 @@ def _query_with_settings(connection, path, params, snapshot):
             # Playstyles aggregate roles, but keep the configured queue and
             # period defaults so the descriptive view shares the user's scope.
             analysis_params.setdefault("role", ["ALL"])
-        scoped, normalized = prepare_analysis(
-            connection, analysis_params,
-            account_filter=account_filter, companion_filter=companion_filter,
-            allow_all_queues=path in {
-                "/api/matchups", "/api/friends", "/api/profile", "/api/matches", "/api/synergy",
-                "/api/playstyles", "/api/playstyle-evidence", "/api/blacklist", "/api/champions",
-                "/api/training-plan",
-            },
-        )
+        with measure("analysis_projection"):
+            scoped, normalized = prepare_analysis(
+                connection, analysis_params,
+                account_filter=account_filter, companion_filter=companion_filter,
+                allow_all_queues=path in {
+                    "/api/matchups", "/api/friends", "/api/profile", "/api/matches", "/api/synergy",
+                    "/api/playstyles", "/api/playstyle-evidence", "/api/blacklist", "/api/champions",
+                    "/api/training-plan",
+                },
+            )
+        record_metric("analysis_observations", scoped.context["observations"])
         if path == "/api/training-plan":
             from hierarchical_champion_model import analyze, training_candidates
             from live_recommendations import competitive_training_plan
@@ -1525,6 +1630,9 @@ def _query_with_settings(connection, path, params, snapshot):
         if status == HTTPStatus.OK:
             payload.update({"algorithm_revision": snapshot["revision"], "algorithm_fingerprint": snapshot["fingerprint"],
                             "context": scoped.context})
+            if path == "/api/training-plan":
+                from training_progress import plan_fingerprint
+                payload["plan_fingerprint"] = plan_fingerprint(payload, analysis_params)
         return status, payload
 
 
@@ -1532,12 +1640,21 @@ def query_database(path: str, params: dict[str, list[str]]) -> tuple[int, dict]:
     from algorithm_settings import get_settings_snapshot
     connection = STORAGE.connect()
     try:
+        if (path in {"/api/champion", "/api/profile", "/api/matches", "/api/recommendation-evidence"}
+                and any("\x00" in value for value in params.get("champion", []))):
+            return HTTPStatus.BAD_REQUEST, {"error": "Il filtro campione contiene un carattere non valido"}
         if STORAGE.engine == "sqlite":
             connection.execute("BEGIN")
         else:
             connection.execute("BEGIN ISOLATION LEVEL REPEATABLE READ")
         if path == "/api/algorithm-settings":
             return HTTPStatus.OK, get_settings_snapshot(connection)
+        if path == "/api/training-progress":
+            from training_progress import load_plan, progress
+            plan = load_plan(connection, params.get("id", [""])[0])
+            if plan is None:
+                return HTTPStatus.NOT_FOUND, {"error": "Piano salvato non trovato"}
+            return HTTPStatus.OK, progress(connection, plan, companion_filter=companion_filter)
         if path not in ANALYTICAL_ENDPOINTS:
             return _query_database_raw(path, params, connection)
         if path == "/api/recommendation-evidence" and normalize_role(params.get("role", [""])[0]) not in ROLES:
@@ -1680,6 +1797,9 @@ def _query_database_raw(path: str, params: dict[str, list[str]], connection=None
     if owns_connection:
         connection = STORAGE.connect()
     try:
+        if path == "/api/recommendation-feedback":
+            from recommendation_feedback import _validated_accounts
+            _validated_accounts(selected_accounts(params))
         params = canonical_account_params(connection, params)
         if path == "/api/recommendation-feedback":
             from recommendation_feedback import feedback_library
@@ -1755,13 +1875,12 @@ def _query_database_raw(path: str, params: dict[str, list[str]], connection=None
             return HTTPStatus.OK, {"metadata": metadata, "summary": summary, "roles": roles}
 
         if path == "/api/accounts":
+            from analysis_runtime import parse_time
             search = params.get("q", [""])[0].strip().casefold()
             account_rows = rows_to_dicts(connection.execute(
                 """SELECT accounts.account,
                           COALESCE(stats.games, 0) analyzed_games,
-                          COALESCE(stats.wins, 0) wins,
-                          stats.first_game,
-                          stats.last_game
+                          COALESCE(stats.wins, 0) wins
                    FROM (
                        SELECT account FROM tracked_account_puuids GROUP BY account
                        UNION
@@ -1772,11 +1891,22 @@ def _query_database_raw(path: str, params: dict[str, list[str]], connection=None
                        SELECT account FROM match_quality GROUP BY account
                    ) accounts
                    LEFT JOIN (
-                       SELECT account, COUNT(*) games, SUM(win) wins, MIN(date) first_game, MAX(date) last_game
+                       SELECT account, COUNT(*) games, SUM(win) wins
                        FROM match_quality GROUP BY account
                    ) stats ON stats.account = accounts.account
                    ORDER BY accounts.account"""
             ))
+            # Raw account coverage includes malformed dates, invalid roles, and
+            # future observations. Only the date extrema need UTC parsing; keep
+            # literal account labels and all existing counts independent of it.
+            date_extrema: dict[str, tuple[datetime, datetime]] = {}
+            for observation in connection.execute("SELECT account,date FROM match_quality"):
+                when = parse_time(observation["date"])
+                if when is None:
+                    continue
+                account = observation["account"]
+                bounds = date_extrema.get(account)
+                date_extrema[account] = (min(bounds[0], when), max(bounds[1], when)) if bounds else (when, when)
             # Saved browser profiles use display names. Expose only aliases
             # with one verified owner so a rename cannot widen the selection.
             alias_owners: dict[str, set[str]] = {}
@@ -1806,6 +1936,9 @@ def _query_database_raw(path: str, params: dict[str, list[str]], connection=None
                 aliases_by_account.setdefault(owner, set()).update(alias_displays[key])
             coverage = account_coverage_by_account(connection)
             for item in account_rows:
+                bounds = date_extrema.get(item["account"])
+                item["first_game"] = bounds[0].isoformat(timespec="microseconds") if bounds else None
+                item["last_game"] = bounds[1].isoformat(timespec="microseconds") if bounds else None
                 item["aliases"] = sorted(aliases_by_account.get(item["account"], set()) - {item["account"], ""})
                 item.update(coverage.get(item["account"], {
                     "raw_games": int(item.get("analyzed_games") or 0),
@@ -1821,6 +1954,8 @@ def _query_database_raw(path: str, params: dict[str, list[str]], connection=None
             return HTTPStatus.OK, {"items": account_rows}
 
         if path == "/api/friends":
+            from analysis_runtime import parse_time, recent_match_sql
+            _, participant_utc_sql, _ = recent_match_sql(connection, "mine")
             accounts = selected_accounts(params)
             account_sql, account_values = account_filter(accounts, "mine.account")
             companion_sql, companion_values = companion_filter(params, "mine.match_id")
@@ -1855,7 +1990,7 @@ def _query_database_raw(path: str, params: dict[str, list[str]], connection=None
             # be reused, so equal names alone must never merge distinct PUUIDs.
             participant_rows = rows_to_dicts(connection.execute(
                 f"""SELECT DISTINCT p.puuid, p.riot_id, p.match_id,
-                                      mine.account, mine.date, p.win friend_win
+                                      mine.account, mine.date, {participant_utc_sql} date_utc, p.win friend_win
                    FROM match_participants p
                    JOIN match_quality mine ON mine.match_id=p.match_id
                    WHERE p.win=mine.win
@@ -1873,8 +2008,14 @@ def _query_database_raw(path: str, params: dict[str, list[str]], connection=None
                            )
                      ){tracked_scope}{account_sql}{companion_sql}""", [*tracked_values, *account_values, *companion_values]
             ))
-            if games_from:
-                participant_rows = [row for row in participant_rows if str(row["date"])[:10] >= games_from]
+            for row in participant_rows:
+                # The projection already provides this value. Private raw
+                # callers normalize their archived spelling at this boundary.
+                if row["date_utc"] is None:
+                    occurred_at = parse_time(row["date"])
+                    row["date_utc"] = occurred_at.isoformat(timespec="microseconds") if occurred_at else None
+            participant_rows = [row for row in participant_rows if row["date_utc"]
+                                and (not games_from or row["date_utc"][:10] >= games_from)]
 
             parent = {}
             puuids_by_name = {}
@@ -1954,7 +2095,7 @@ def _query_database_raw(path: str, params: dict[str, list[str]], connection=None
                 group["results"][row["match_id"]] = row["friend_win"]
                 group["observations"][(row["account"], row["match_id"])] = {
                     "account": row["account"], "match_id": row["match_id"], "win": row["friend_win"]}
-                group["dates"].append(row["date"])
+                group["dates"].append(row["date_utc"])
 
             for node, value in manual_nodes.items():
                 root = find(node)
@@ -1984,7 +2125,10 @@ def _query_database_raw(path: str, params: dict[str, list[str]], connection=None
                 })
             from contextual_comparisons import build_contrast
             reference = fetch_outcome_rows(connection, params)
-            reference = [row for row in reference if not games_from or str(row["date"])[:10] >= games_from]
+            if games_from:
+                cutoff = parse_time(games_from)
+                reference = [row for row in reference
+                             if (occurred_at := parse_time(row["date"])) is not None and occurred_at >= cutoff]
             for item in friends:
                 item.pop("_outcomes")
                 contrast = build_contrast(reference, item.pop("_observations"), accounts)
@@ -2034,11 +2178,12 @@ def _query_database_raw(path: str, params: dict[str, list[str]], connection=None
                 "accounts": accounts,
             }
             return HTTPStatus.OK, {"items": friends, "summary": summary, "manual_groups": [
-                {"id": int(node.split(":", 1)[1]), "name": value["name"], "aliases": value["aliases"]}
+                {"id": friend_group_json_id(int(node.split(":", 1)[1])), "name": value["name"], "aliases": value["aliases"]}
                 for node, value in manual_nodes.items()
             ]}
 
         if path == "/api/sync-status":
+            from sync_runs import recent_runs
             metadata = {row["key"]: row["value"] for row in connection.execute("SELECT key, value FROM source_metadata")}
             checkpoints = sorted(APP_ROOT.glob(".champion_fit.riot-*.checkpoint.json"), key=lambda item: item.stat().st_mtime, reverse=True)
             active = sync_is_active()
@@ -2050,6 +2195,7 @@ def _query_database_raw(path: str, params: dict[str, list[str]], connection=None
                 "last_checkpoint_at": datetime.fromtimestamp(checkpoints[0].stat().st_mtime).isoformat() if checkpoints else None,
                 "last_completed_at": metadata.get("last_sync_at"),
                 "metadata": metadata,
+                "recent_runs": recent_runs(connection),
             }
 
         if path == "/api/recommendation-evidence":
@@ -2066,24 +2212,39 @@ def _query_database_raw(path: str, params: dict[str, list[str]], connection=None
                 return HTTPStatus.BAD_REQUEST, {"error": "limit and offset must be integers"}
             if limit < 1 or offset < 0:
                 return HTTPStatus.BAD_REQUEST, {"error": "limit must be positive and offset non-negative"}
+            if offset > SQL_INTEGER_MAX:
+                return HTTPStatus.BAD_REQUEST, {"error": "offset is too large"}
             return HTTPStatus.OK, recommendation_evidence_data(
                 connection, params, champion, role, min(limit, 100), offset,
             )
 
         if path == "/api/profile":
+            from analysis_runtime import recent_match_sql
+            _, date_utc_sql, date_order_sql = recent_match_sql(connection)
             accounts = selected_accounts(params)
             account_sql, account_values = account_filter(accounts)
             companion_sql, companion_values = companion_filter(params, "m.match_id")
+            champion_options = [row["champion"] for row in connection.execute(
+                f"SELECT DISTINCT m.champion FROM match_quality m WHERE 1=1{account_sql}{companion_sql} ORDER BY m.champion",
+                [*account_values, *companion_values],
+            )]
+            champion = params.get("champion", [""])[0]
+            if champion:
+                account_sql += " AND m.champion=?"
+                account_values = [*account_values, champion]
             scoped_values = [*account_values, *companion_values]
             base = connection.execute(
                 f"""SELECT COUNT(*) games, COALESCE(SUM(win), 0) wins,
                           ROUND(COALESCE(AVG(win), 0) * 100, 1) win_rate,
                           ROUND(COALESCE(AVG(duration_minutes), 0), 1) avg_duration,
                           COUNT(DISTINCT champion) champions_played,
-                          MIN(date) first_game, MAX(date) last_game
+                          MIN({date_order_sql}) first_game, MAX({date_order_sql}) last_game
                    FROM match_quality m WHERE 1=1{account_sql}{companion_sql}""", scoped_values
             ).fetchone()
             summary = dict(base)
+            summary["avg_duration"] = _finite_duration_average(
+                connection, summary["avg_duration"], f"1=1{account_sql}{companion_sql}", scoped_values,
+            )
             summary["losses"] = summary["games"] - summary["wins"]
             annotation_summary = connection.execute(
                 f"""SELECT COALESCE(SUM(invincible), 0) invincible_games,
@@ -2095,9 +2256,10 @@ def _query_database_raw(path: str, params: dict[str, list[str]], connection=None
             ).fetchone()
             summary.update(dict(annotation_summary))
             recent = rows_to_dicts(connection.execute(
-                f"""SELECT date, account, champion, role, win, queue, duration_minutes,
+                f"""SELECT match_id, date, {date_utc_sql} date_utc, account, champion, role, win, queue, duration_minutes,
                           match_quality_score, anomaly_flags
-                   FROM match_quality m WHERE 1=1{account_sql}{companion_sql} ORDER BY date DESC LIMIT 20""", scoped_values
+                   FROM match_quality m WHERE 1=1{account_sql}{companion_sql}
+                   ORDER BY {date_order_sql} DESC, m.match_id ASC, m.account ASC LIMIT 20""", scoped_values
             ))
             champions = rows_to_dicts(connection.execute(
                 f"""SELECT champion, COUNT(*) games, SUM(win) wins,
@@ -2106,6 +2268,11 @@ def _query_database_raw(path: str, params: dict[str, list[str]], connection=None
                    FROM match_quality m WHERE 1=1{account_sql}{companion_sql}
                    GROUP BY champion ORDER BY games DESC, win_rate DESC LIMIT 12""", scoped_values
             ))
+            for item in champions:
+                item["avg_duration"] = _finite_duration_average(
+                    connection, item["avg_duration"], f"m.champion=?{account_sql}{companion_sql}",
+                    [item["champion"], *scoped_values],
+                )
             recommendation_account_sql, recommendation_account_values = account_filter(accounts, "m.account")
             positive_sql, negative_sql, weight_sql = recommendation_evidence_expressions()
             evidence_select = f"""SELECT m.role, m.champion, COUNT(*) games, SUM(m.win) wins,
@@ -2127,17 +2294,23 @@ def _query_database_raw(path: str, params: dict[str, list[str]], connection=None
                     FROM match_quality m WHERE role != 'INVALID' AND 1=1{account_sql}{companion_sql}
                    GROUP BY role ORDER BY games DESC""", scoped_values
             ))
-            weekday_expression = "EXTRACT(DOW FROM date::timestamp)::integer" if STORAGE.engine == "postgres" else "CAST(strftime('%w', date) AS INTEGER)"
+            weekday_expression = (f"EXTRACT(DOW FROM {date_order_sql}::timestamp)::integer" if STORAGE.engine == "postgres"
+                                  else f"CAST(strftime('%w', {date_order_sql}) AS INTEGER)")
             weekdays = rows_to_dicts(connection.execute(
                 f"""SELECT {weekday_expression} weekday, COUNT(*) games,
                           ROUND(AVG(win) * 100, 1) win_rate
                    FROM match_quality m WHERE 1=1{account_sql}{companion_sql}
                    GROUP BY weekday ORDER BY weekday""", scoped_values
             ))
-            recommendations = rank_recommendations(scoped_champion_evidence(connection, params))
-            return HTTPStatus.OK, {"accounts": accounts, "summary": summary, "recent": recent, "champions": champions, "roles": roles, "weekdays": weekdays, "recommendations": recommendations}
+            recommendations = rank_recommendations([
+                item for item in scoped_champion_evidence(connection, params)
+                if not champion or item["champion"] == champion
+            ])
+            return HTTPStatus.OK, {"accounts": accounts, "summary": summary, "recent": recent, "champions": champions, "champion_options": champion_options, "roles": roles, "weekdays": weekdays, "recommendations": recommendations}
 
         if path == "/api/champion":
+            from analysis_runtime import recent_match_sql
+            _, date_utc_sql, date_order_sql = recent_match_sql(connection)
             champion = params.get("champion", [""])[0].strip()
             role = normalize_role(params.get("role", [""])[0])
             if role not in ROLES:
@@ -2184,6 +2357,11 @@ def _query_database_raw(path: str, params: dict[str, list[str]], connection=None
                           ROUND(COALESCE(AVG(duration_minutes),0),1) avg_duration
                    FROM match_quality m WHERE champion=?{detail_role_sql}{account_sql}{companion_sql}""", scoped_detail_values
             ).fetchone()
+            stat = dict(stat)
+            stat["avg_duration"] = _finite_duration_average(
+                connection, stat["avg_duration"], f"m.champion=?{detail_role_sql}{account_sql}{companion_sql}",
+                scoped_detail_values,
+            )
             annotated = connection.execute(
                 f"""SELECT COALESCE(SUM(a.invincible),0) invincible_games,
                           COALESCE(SUM(a.carryable_loss),0) carryable_losses,
@@ -2193,8 +2371,9 @@ def _query_database_raw(path: str, params: dict[str, list[str]], connection=None
                    WHERE m.champion=?{detail_role_sql}{account_sql}{companion_sql}""", scoped_detail_values
             ).fetchone()
             recent = rows_to_dicts(connection.execute(
-                f"""SELECT date, account, role, win, reason
-                   FROM match_quality m WHERE champion=?{detail_role_sql}{account_sql}{companion_sql} ORDER BY date DESC LIMIT 20""", scoped_detail_values
+                f"""SELECT date, {date_utc_sql} date_utc, account, role, win, reason
+                   FROM match_quality m WHERE champion=?{detail_role_sql}{account_sql}{companion_sql}
+                   ORDER BY {date_order_sql} DESC, m.match_id ASC, m.account ASC LIMIT 20""", scoped_detail_values
             ))
             roles = rows_to_dicts(connection.execute("SELECT role, games_observed, account_adjusted_fit_score, credible_lower_90, credible_upper_90 FROM champion_fit WHERE champion=? ORDER BY games_observed DESC", (champion,)))
             for item in roles:
@@ -2326,13 +2505,23 @@ def _query_database_raw(path: str, params: dict[str, list[str]], connection=None
             account_sql, account_values = account_filter(accounts, "m.account")
             companion_sql, companion_values = companion_filter(params, "m.match_id")
             role = normalize_role(params.get("role", ["ALL"])[0])
-            role_values = [role] if role in ROLES else []
-            scope = f"WHERE EXISTS (SELECT 1 FROM match_quality m WHERE m.champion=p.champion AND m.role=p.role{account_sql}{companion_sql}) AND p.role=?" if accounts and role in ROLES else ("WHERE p.role=?" if role in ROLES else (f"WHERE EXISTS (SELECT 1 FROM match_quality m WHERE m.champion=p.champion AND m.role=p.role{account_sql}{companion_sql})" if accounts else ""))
+            scope_clauses = []
+            scope_values = []
+            if accounts or companion_sql:
+                scope_clauses.append(
+                    "EXISTS (SELECT 1 FROM match_quality m "
+                    f"WHERE m.champion=p.champion AND m.role=p.role{account_sql}{companion_sql})"
+                )
+                scope_values.extend([*account_values, *companion_values])
+            if role in ROLES:
+                scope_clauses.append("p.role=?")
+                scope_values.append(role)
+            scope = "WHERE " + " AND ".join(scope_clauses) if scope_clauses else ""
             plan_items = rows_to_dicts(connection.execute(
                 f"""SELECT p.*, c.icon_url FROM test_plan p JOIN champions c ON c.champion=p.champion
                    {scope}
                    ORDER BY p.allocated_games DESC, p.base_value_of_information DESC, p.role, p.champion"""
-            , [*account_values, *companion_values, *role_values]))
+            , scope_values))
             requested_n = as_int(params.get("n", [""])[0]) if params.get("n", [""])[0] else 0
             source_total = sum(int(item["allocated_games"]) for item in plan_items)
             if requested_n > 0 and source_total > 0 and requested_n != source_total:
@@ -2340,9 +2529,11 @@ def _query_database_raw(path: str, params: dict[str, list[str]], connection=None
                 # the total exact through a largest-remainder pass.
                 scaled = []
                 for index, item in enumerate(plan_items):
-                    raw = int(item["allocated_games"]) * requested_n / source_total
-                    floor_value = int(raw)
-                    scaled.append((index, floor_value, raw - floor_value))
+                    numerator = int(item["allocated_games"]) * requested_n
+                    floor_value, fraction_numerator = divmod(abs(numerator), source_total)
+                    if numerator < 0:
+                        floor_value, fraction_numerator = -floor_value, -fraction_numerator
+                    scaled.append((index, floor_value, fraction_numerator))
                     item["allocated_games"] = floor_value
                 remainder = requested_n - sum(row[1] for row in scaled)
                 for index, _, _ in sorted(scaled, key=lambda row: (-row[2], row[0]))[:remainder]:
@@ -2407,6 +2598,8 @@ def _query_database_raw(path: str, params: dict[str, list[str]], connection=None
             ))}
 
         if path == "/api/matches":
+            from analysis_runtime import recent_match_sql
+            source_columns_sql, date_utc_sql, date_order_sql = recent_match_sql(connection)
             clauses, values = ["1=1"], []
             account_sql, account_values = account_filter(selected_accounts(params))
             companion_sql, companion_values = companion_filter(params, "m.match_id")
@@ -2421,7 +2614,18 @@ def _query_database_raw(path: str, params: dict[str, list[str]], connection=None
             if flag == "afk": clauses.append("(explicit_afk=1 OR suspected_quasi_afk=1)")
             if flag == "loss": clauses.append("win=0")
             limit = min(max(as_int(params.get("limit", ["24"])[0]), 1), 100)
-            sql = f"""SELECT m.*, c.icon_url,
+            try:
+                offset = int(params.get("offset", ["0"])[0])
+            except (TypeError, ValueError):
+                return HTTPStatus.BAD_REQUEST, {"error": "offset must be an integer"}
+            if offset < 0 or offset > SQL_INTEGER_MAX:
+                return HTTPStatus.BAD_REQUEST, {"error": "offset is outside the supported range"}
+            filtered_values = [*values, *account_values, *companion_values]
+            total = connection.execute(
+                f"SELECT COUNT(*) total FROM match_quality m WHERE {' AND '.join(clauses)}{account_sql}{companion_sql}",
+                filtered_values,
+            ).fetchone()["total"]
+            sql = f"""SELECT {source_columns_sql}, {date_utc_sql} date_utc, c.icon_url,
                        COALESCE(a.invincible, 0) annotation_invincible,
                        COALESCE(a.carryable_loss, 0) annotation_carryable_loss,
                        COALESCE(a.afk_player, 0) annotation_afk_player,
@@ -2430,15 +2634,21 @@ def _query_database_raw(path: str, params: dict[str, list[str]], connection=None
                        COALESCE(a.manual_label, '') annotation_manual_label,
                        COALESCE(a.note, '') annotation_note,
                        COALESCE(a.confidence, 1.0) annotation_confidence
-                FROM match_quality m JOIN champions c ON c.champion=m.champion
+                FROM match_quality m LEFT JOIN champions c ON c.champion=m.champion
                 LEFT JOIN match_annotations a ON a.match_id=m.match_id
-                WHERE {' AND '.join(clauses)}{account_sql}{companion_sql} ORDER BY date DESC LIMIT ?"""
-            return HTTPStatus.OK, {"items": rows_to_dicts(connection.execute(sql, [*values, *account_values, *companion_values, limit]))}
+                WHERE {' AND '.join(clauses)}{account_sql}{companion_sql}
+                ORDER BY {date_order_sql} DESC, m.match_id ASC, m.account ASC LIMIT ? OFFSET ?"""
+            items = rows_to_dicts(connection.execute(sql, [*filtered_values, limit, offset]))
+            next_offset = offset + len(items)
+            return HTTPStatus.OK, {"items": items, "total": total, "limit": limit, "offset": offset,
+                                   "next_offset": next_offset if next_offset < total else None}
 
         if path == "/api/annotations":
             match_id = params.get("match_id", [""])[0]
             if not match_id:
                 return HTTPStatus.BAD_REQUEST, {"error": "match_id is required"}
+            if "\x00" in match_id:
+                return HTTPStatus.BAD_REQUEST, {"error": "Identificativo della partita non valido"}
             row = connection.execute("SELECT * FROM match_annotations WHERE match_id=?", (match_id,)).fetchone()
             return HTTPStatus.OK, {
                 "item": dict(row) if row else None,
@@ -2459,32 +2669,64 @@ class FriendGroupConflictError(RuntimeError):
     """A friend-group name is already owned by another group."""
 
 
-def lock_friend_group_name(connection, name: str):
-    """Serialize one normalized group name and return every current owner."""
-    connection.execute("BEGIN IMMEDIATE" if STORAGE.engine == "sqlite" else "BEGIN")
+def lock_friend_aliases(connection) -> None:
+    """Serialize alias ownership before reads, including Unicode variants.
+
+    SQLite callers already hold BEGIN IMMEDIATE. PostgreSQL's text UNIQUE
+    constraint cannot enforce Python casefold semantics, so all friend-group
+    mutations share a transaction lock before inspecting or changing aliases.
+    """
     if STORAGE.engine == "postgres":
-        # Use the database's own lower() semantics for both the lock key and
-        # the ownership query. Transaction-level locks release on commit or
-        # rollback and serialize case variants across server processes.
         connection.execute(
-            "SELECT pg_advisory_xact_lock(hashtext(lower(?)))", (name,),
+            "SELECT pg_advisory_xact_lock(hashtext(?))",
+            ("champion_fit.friend_group_aliases",),
         ).fetchone()
-    matches = connection.execute(
-        "SELECT id FROM friend_groups WHERE lower(name)=lower(?) ORDER BY id",
-        (name,),
-    ).fetchall()
+
+
+def matching_friend_aliases(connection, aliases):
+    """Use the same Unicode identity comparison as the Friends reader.
+
+    SQLite lower() only handles ASCII and PostgreSQL lower() is locale-aware;
+    neither matches casefold (for example, Straße and STRASSE). Manual aliases
+    are a small user-managed collection, so compare them portably in Python.
+    """
+    keys = {alias.casefold() for alias in aliases}
+    return [row for row in connection.execute(
+        "SELECT group_id,alias FROM friend_group_aliases ORDER BY group_id,alias"
+    ) if row["alias"].casefold() in keys]
+
+
+def lock_friend_group_name(connection, name: str):
+    """Serialize mutations and match every owner using portable Unicode semantics."""
+    connection.execute("BEGIN IMMEDIATE" if STORAGE.engine == "sqlite" else "BEGIN")
+    lock_friend_aliases(connection)
+    key = name.casefold()
+    matches = [row for row in connection.execute("SELECT id,name FROM friend_groups ORDER BY id")
+               if row["name"].casefold() == key]
     if len(matches) > 1:
         raise FriendGroupConflictError("multiple friend groups use this name")
     return matches
 
 
+class BodyReadTimeout(TimeoutError):
+    """Distinguish an incomplete request body from a database operation timeout."""
+
+
 class DashboardHandler(SimpleHTTPRequestHandler):
+    def handle(self) -> None:
+        try:
+            super().handle()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            # Navigation and full refresh can cancel a static asset download.
+            self.close_connection = True
+
     def setup(self) -> None:
         super().setup()
         self.connection.settimeout(REQUEST_BODY_TIMEOUT_SECONDS)
 
     def __init__(self, *args, directory=None, **kwargs):
         self._response_status = None
+        self._request_id = None
         super().__init__(*args, directory=str(directory or WEB_ROOT), **kwargs)
 
     @staticmethod
@@ -2520,8 +2762,12 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        if status == HTTPStatus.SERVICE_UNAVAILABLE:
+            self.send_header("Retry-After", "1")
         self.end_headers()
-        self.wfile.write(data)
+        if self.command != "HEAD":
+            self.wfile.write(data)
 
     def send_response(self, code, message=None) -> None:
         self._response_status = int(code)
@@ -2529,6 +2775,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
     def end_headers(self) -> None:
         path = urlparse(self.path).path
+        if path.startswith("/api/") and self._request_id:
+            self.send_header("X-Request-ID", self._request_id)
         if path == SPA_ENTRY:
             self.send_header("Cache-Control", "no-cache, must-revalidate")
             self.send_header("Pragma", "no-cache")
@@ -2539,6 +2787,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self.send_header("Cache-Control", "public, max-age=31536000, immutable")
         super().end_headers()
 
+    @api_operation
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path.startswith("/api/"):
@@ -2548,6 +2797,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         self._prepare_static_path(parsed.path)
         super().do_GET()
 
+    @api_operation
     def do_HEAD(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path.startswith("/api/"):
@@ -2572,11 +2822,77 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                     connection.close()
         except SettingsConflictError as error:
             status, payload = HTTPStatus.CONFLICT, {"error": str(error), "snapshot": error.snapshot}
-        except (socket.timeout, TimeoutError):
+        except BodyReadTimeout:
             status, payload = HTTPStatus.REQUEST_TIMEOUT, {"error": "JSON body read timed out"}
         except (ValueError, TypeError, json.JSONDecodeError) as error:
             status, payload = HTTPStatus.BAD_REQUEST, {"error": str(error)}
         data = json.dumps(payload, ensure_ascii=False, default=float).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _training_progress_request(self) -> None:
+        import re
+        from algorithm_settings import get_settings_snapshot
+        from training_progress import load_plan, save_plan, progress, valid_plan_id
+        connection = None
+        try:
+            body = self._read_json_body(32768)
+            if set(body) != {"id", "fingerprint", "params"}:
+                raise ValueError("Specifica identificativo, piano e contesto")
+            valid_plan_id(body["id"])
+            if not isinstance(body["fingerprint"], str) or not re.fullmatch(r"[a-f0-9]{64}", body["fingerprint"]):
+                raise ValueError("Piano non valido: aggiorna l’anteprima")
+            params = body["params"]
+            allowed = {"account", "companion_account", "companion_mode", "role", "queue", "days", "budget", "algorithm_revision"}
+            if not isinstance(params, dict) or set(params) - allowed or any(
+                not isinstance(values, list) or not values or any(not isinstance(value, str) for value in values)
+                for values in params.values()
+            ):
+                raise ValueError("Contesto del piano non valido")
+            connection = STORAGE.connect()
+            for attempt in range(3):
+                try:
+                    connection.execute("BEGIN IMMEDIATE" if STORAGE.engine == "sqlite" else "BEGIN ISOLATION LEVEL SERIALIZABLE")
+                    existing = load_plan(connection, body["id"])
+                    if existing:
+                        if existing["fingerprint"] != body["fingerprint"]:
+                            status, payload = HTTPStatus.CONFLICT, {"error": "Identificativo già usato per un altro piano"}
+                        else:
+                            status, payload = HTTPStatus.OK, progress(connection, existing, companion_filter=companion_filter)
+                    else:
+                        settings = get_settings_snapshot(connection)
+                        effective_params = canonical_account_params(connection, params)
+                        status, plan = _query_with_settings(connection, "/api/training-plan", effective_params, settings)
+                        if plan.get("plan_fingerprint") != body["fingerprint"]:
+                            status, payload = HTTPStatus.CONFLICT, {"error": "Il piano è cambiato. Aggiorna l’anteprima prima di seguirlo."}
+                        else:
+                            snapshot = save_plan(connection, body["id"], plan, effective_params)
+                            payload = progress(connection, snapshot, companion_filter=companion_filter)
+                    connection.commit()
+                    break
+                except Exception as error:
+                    sqlstate = getattr(error, "sqlstate", None)
+                    same_plan_race = (sqlstate == "23505"
+                                      and getattr(getattr(error, "diag", None), "table_name", None) == "training_plan_runs")
+                    if (STORAGE.engine != "postgres" or attempt == 2
+                            or not (sqlstate in {"40001", "40P01"} or same_plan_race)):
+                        raise
+                    # A concurrent start or import can invalidate a serializable
+                    # snapshot. Re-read the winner and revalidate the preview in
+                    # a fresh transaction; never overwrite an existing choice.
+                    connection.rollback()
+        except BodyReadTimeout:
+            status, payload = HTTPStatus.REQUEST_TIMEOUT, {"error": "JSON body read timed out"}
+        except (ValueError, TypeError, OverflowError) as error:
+            status, payload = HTTPStatus.BAD_REQUEST, {"error": str(error)}
+        finally:
+            if connection is not None:
+                connection.close()
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
@@ -2602,7 +2918,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             if connection is not None:
                 connection.execute("ROLLBACK")
             status, payload = HTTPStatus.CONFLICT, {"error": str(error), "snapshot": error.snapshot}
-        except (socket.timeout, TimeoutError):
+        except BodyReadTimeout:
             if connection is not None:
                 connection.execute("ROLLBACK")
             status, payload = HTTPStatus.REQUEST_TIMEOUT, {"error": "JSON body read timed out"}
@@ -2638,23 +2954,28 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             raise ValueError("JSON body is too large")
         try:
             data = self.rfile.read(length)
-        except (socket.timeout, TimeoutError):
+        except (socket.timeout, TimeoutError) as error:
             self.close_connection = True
-            raise
+            raise BodyReadTimeout("JSON body read timed out") from error
         if len(data) != length:
             self.close_connection = True
             raise ValueError("JSON body is incomplete")
-        body = json.loads(data)
+        try:
+            body = json.loads(data)
+        except RecursionError as error:
+            raise ValueError("JSON body is too deeply nested") from error
         if not isinstance(body, dict):
             raise ValueError("È richiesto un oggetto JSON")
         return body
 
+    @api_operation
     def do_PUT(self) -> None:
         if urlparse(self.path).path == "/api/algorithm-settings":
             self._settings_request()
             return
         self._send_json_error(HTTPStatus.NOT_FOUND, "Endpoint not found")
 
+    @api_operation
     def do_DELETE(self) -> None:
         parsed = urlparse(self.path)
         prefix = "/api/friend-groups/"
@@ -2665,16 +2986,22 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             resource = parsed.path[len(prefix):]
             parts = resource.split("/", 2)
             group_id = int(parts[0])
+            if not 1 <= group_id <= SQL_INTEGER_MAX:
+                raise ValueError("Invalid friend group ID")
             connection = STORAGE.connect()
             try:
+                connection.execute("BEGIN IMMEDIATE" if STORAGE.engine == "sqlite" else "BEGIN")
+                lock_friend_aliases(connection)
                 if len(parts) == 3 and parts[1] == "aliases":
                     alias = unquote(parts[2]).strip()
-                    cursor = connection.execute(
-                        "DELETE FROM friend_group_aliases WHERE group_id=? AND lower(alias)=lower(?)",
-                        (group_id, alias),
-                    )
-                    if cursor.rowcount == 0:
+                    aliases = [row["alias"] for row in matching_friend_aliases(connection, [alias])
+                               if row["group_id"] == group_id]
+                    if not aliases:
                         raise ValueError("alias not found")
+                    connection.executemany(
+                        "DELETE FROM friend_group_aliases WHERE group_id=? AND alias=?",
+                        [(group_id, stored_alias) for stored_alias in aliases],
+                    )
                     remaining = connection.execute(
                         "SELECT COUNT(*) AS count FROM friend_group_aliases WHERE group_id=?",
                         (group_id,),
@@ -2690,7 +3017,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 connection.commit()
             finally:
                 connection.close()
-            data = json.dumps({"ok": True, "id": group_id}).encode("utf-8")
+            data = json.dumps({"ok": True, "id": friend_group_json_id(group_id)}).encode("utf-8")
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(data)))
@@ -2703,6 +3030,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 raise
             self._send_json_error(HTTPStatus.CONFLICT, "Friend group conflicts with existing data")
 
+    @api_operation
     def do_PATCH(self) -> None:
         parsed = urlparse(self.path)
         prefix = "/api/friend-groups/"
@@ -2711,10 +3039,14 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             return
         try:
             group_id = int(parsed.path[len(prefix):])
+            if not 1 <= group_id <= SQL_INTEGER_MAX:
+                raise ValueError("Invalid friend group ID")
             payload = self._read_json_body(16384)
             if set(payload) != {"name"} or not isinstance(payload.get("name"), str):
                 raise ValueError("name must be a string")
             name = payload["name"].strip()
+            if "\x00" in name:
+                raise ValueError("name must not contain NUL")
             if not name:
                 raise ValueError("name is required")
             if len(name) > 80:
@@ -2735,7 +3067,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 raise
             finally:
                 connection.close()
-            data = json.dumps({"ok": True, "id": group_id, "name": name}, ensure_ascii=False).encode("utf-8")
+            data = json.dumps({"ok": True, "id": friend_group_json_id(group_id), "name": name}, ensure_ascii=False).encode("utf-8")
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(data)))
@@ -2743,7 +3075,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self.wfile.write(data)
         except FriendGroupConflictError as error:
             self._send_json_error(HTTPStatus.CONFLICT, str(error))
-        except (socket.timeout, TimeoutError):
+        except BodyReadTimeout:
             self._send_json_error(HTTPStatus.REQUEST_TIMEOUT, "JSON body read timed out")
         except (ValueError, TypeError, json.JSONDecodeError):
             self._send_json_error(HTTPStatus.BAD_REQUEST, "Invalid friend group name")
@@ -2752,6 +3084,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 raise
             self._send_json_error(HTTPStatus.CONFLICT, "Friend group conflicts with existing data")
 
+    @api_operation
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
         path_parts = parsed.path.strip("/").split("/")
@@ -2762,6 +3095,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         )
         if parsed.path == "/api/recommendation-feedback":
             self._recommendation_feedback_request()
+            return
+        if parsed.path == "/api/training-progress":
+            self._training_progress_request()
             return
         if parsed.path == "/api/algorithm-settings/preview":
             self._settings_request(preview=True)
@@ -2775,7 +3111,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                     group_id = int(path_parts[2])
                 except ValueError as error:
                     raise ValueError("ID del gruppo non valido") from error
-                if group_id < 1:
+                if not 1 <= group_id <= SQL_INTEGER_MAX:
                     raise ValueError("ID del gruppo non valido")
                 payload = self._read_json_body()
                 if set(payload) != {"aliases"}:
@@ -2783,6 +3119,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 raw_aliases = payload.get("aliases")
                 if not isinstance(raw_aliases, list) or any(not isinstance(alias, str) for alias in raw_aliases):
                     raise ValueError("aliases deve essere una lista di Riot ID")
+                if any("\x00" in alias for alias in raw_aliases):
+                    raise ValueError("I Riot ID non possono contenere il carattere NUL")
                 aliases = []
                 seen_aliases = set()
                 for raw_alias in raw_aliases:
@@ -2799,6 +3137,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 connection = STORAGE.connect()
                 try:
                     connection.execute("BEGIN IMMEDIATE" if STORAGE.engine == "sqlite" else "BEGIN")
+                    lock_friend_aliases(connection)
                     group_query = "SELECT id FROM friend_groups WHERE id=?"
                     if STORAGE.engine == "postgres":
                         group_query += " FOR UPDATE"
@@ -2808,12 +3147,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
                     added_aliases = []
                     for alias in aliases:
-                        existing = connection.execute(
-                            "SELECT group_id FROM friend_group_aliases WHERE lower(alias)=lower(?)",
-                            (alias,),
-                        ).fetchone()
+                        existing = matching_friend_aliases(connection, [alias])
                         if existing:
-                            if int(existing["group_id"]) != group_id:
+                            if any(int(row["group_id"]) != group_id for row in existing):
                                 raise FriendGroupConflictError(
                                     f"Il Riot ID {alias} appartiene già a un altro gruppo."
                                 )
@@ -2831,7 +3167,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                     connection.close()
 
                 data = json.dumps(
-                    {"ok": True, "id": group_id, "added_aliases": added_aliases},
+                    {"ok": True, "id": friend_group_json_id(group_id), "added_aliases": added_aliases},
                     ensure_ascii=False,
                 ).encode("utf-8")
                 self.send_response(HTTPStatus.OK)
@@ -2851,6 +3187,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 if not isinstance(raw_aliases, list) or any(not isinstance(alias, str) for alias in raw_aliases):
                     raise ValueError("aliases must be a list of strings")
                 name = payload["name"].strip()
+                if "\x00" in name or any("\x00" in alias for alias in raw_aliases):
+                    raise ValueError("friend group name and aliases must not contain NUL")
                 aliases = list(dict.fromkeys(alias.strip() for alias in raw_aliases if alias.strip()))
                 if len(name) > 80 or any(len(alias) > 120 for alias in aliases):
                     raise ValueError("friend group name or alias is too long")
@@ -2867,19 +3205,13 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                     # when a renamed group is saved again.
                     group = matches[0] if matches else None
                     if not group:
-                        placeholders = ",".join("?" for _ in aliases)
-                        group = connection.execute(
-                            f"SELECT group_id AS id FROM friend_group_aliases "
-                            f"WHERE lower(alias) IN ({','.join('lower(?)' for _ in aliases)}) "
-                            "ORDER BY group_id LIMIT 1",
-                            aliases,
-                        ).fetchone()
+                        existing = matching_friend_aliases(connection, aliases)
+                        group = {"id": existing[0]["group_id"]} if existing else None
                     if group:
                         group_id = group["id"]
                     else:
-                        connection.execute("INSERT INTO friend_groups(name) VALUES(?)", (name,))
                         group_id = connection.execute(
-                            "SELECT id FROM friend_groups WHERE lower(name)=lower(?)", (name,)
+                            "INSERT INTO friend_groups(name) VALUES(?) RETURNING id", (name,)
                         ).fetchone()["id"]
 
                     # If an alias is already in another manual group, merge that
@@ -2887,21 +3219,18 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                     # This makes it possible to extend/rename an existing group.
                     conflicting_ids = set()
                     for alias in aliases:
-                        existing = connection.execute(
-                            "SELECT group_id FROM friend_group_aliases WHERE lower(alias)=lower(?)",
-                            (alias,),
-                        ).fetchall()
+                        existing = matching_friend_aliases(connection, [alias])
                         conflicting_ids.update(row["group_id"] for row in existing if row["group_id"] != group_id)
-                    for conflicting_id in conflicting_ids:
+                    for conflicting_id in sorted(conflicting_ids):
                         source_aliases = connection.execute(
-                            "SELECT alias FROM friend_group_aliases WHERE group_id=?", (conflicting_id,)
+                            "SELECT alias FROM friend_group_aliases WHERE group_id=? ORDER BY alias", (conflicting_id,)
                         ).fetchall()
                         for source_row in source_aliases:
                             alias = source_row["alias"]
-                            already_in_target = connection.execute(
-                                "SELECT 1 FROM friend_group_aliases WHERE group_id=? AND lower(alias)=lower(?)",
-                                (group_id, alias),
-                            ).fetchone()
+                            already_in_target = any(
+                                row["group_id"] == group_id
+                                for row in matching_friend_aliases(connection, [alias])
+                            )
                             if already_in_target:
                                 connection.execute(
                                     "DELETE FROM friend_group_aliases WHERE group_id=? AND alias=?",
@@ -2914,10 +3243,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                                 )
                         connection.execute("DELETE FROM friend_groups WHERE id=?", (conflicting_id,))
                     for alias in aliases:
-                        existing = connection.execute(
-                            "SELECT alias FROM friend_group_aliases WHERE lower(alias)=lower(?)",
-                            (alias,),
-                        ).fetchone()
+                        existing = matching_friend_aliases(connection, [alias])
                         if not existing:
                             connection.execute(
                                 "INSERT INTO friend_group_aliases(group_id, alias) VALUES(?, ?)",
@@ -2956,10 +3282,12 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 raise ValueError("L'etichetta manuale deve contenere al massimo 40 caratteri")
             if not isinstance(payload["note"], str) or len(payload["note"]) > 1000:
                 raise ValueError("La nota deve contenere al massimo 1000 caratteri")
+            if any("\x00" in value for value in (match_id, payload["manual_label"], payload["note"])):
+                raise ValueError("I testi dell'annotazione non possono contenere il carattere NUL")
             if (isinstance(payload["confidence"], bool)
                     or not isinstance(payload["confidence"], (int, float))
-                    or not math.isfinite(float(payload["confidence"]))
-                    or not 0 <= float(payload["confidence"]) <= 1):
+                    or not 0 <= payload["confidence"] <= 1
+                    or not math.isfinite(float(payload["confidence"]))):
                 raise ValueError("La sicurezza deve essere un numero tra 0 e 1")
             expected_revision = payload["expected_revision"]
             if expected_revision is not None and (
@@ -3013,7 +3341,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             )
         except FriendGroupConflictError as error:
             self._send_json_error(HTTPStatus.CONFLICT, str(error))
-        except (socket.timeout, TimeoutError):
+        except BodyReadTimeout:
             self._send_json_error(HTTPStatus.REQUEST_TIMEOUT, "JSON body read timed out")
         except (ValueError, json.JSONDecodeError, TypeError) as error:
             data = json.dumps({"error": str(error)}, ensure_ascii=False).encode("utf-8")
@@ -3028,7 +3356,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._send_json_error(HTTPStatus.CONFLICT, "Friend group conflicts with existing data")
 
     def log_message(self, format: str, *args) -> None:
-        print(f"[web] {self.address_string()} {format % args}")
+        if urlparse(self.path).path.startswith("/api/"):
+            return  # Structured API logs omit query strings and IDs.
+        print(f"[web] {self.command} {urlparse(self.path).path} {self._response_status or '-'}")
 
 
 def bootstrap_algorithm_settings() -> None:
@@ -3048,6 +3378,7 @@ def bootstrap_algorithm_settings() -> None:
 
 
 def main() -> None:
+    configure_logging()
     parser = argparse.ArgumentParser(description="Serve the Champion Fit SQLite dashboard.")
     parser.add_argument("--source", type=Path, default=DEFAULT_SOURCE, help="Directory containing Champion Fit CSV/JSON outputs")
     parser.add_argument("--rebuild", action="store_true", help="Re-import source outputs into champion_fit.db")

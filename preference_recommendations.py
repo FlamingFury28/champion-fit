@@ -24,15 +24,18 @@ def _role(value: object) -> str:
     return "SUPPORT" if value == "UTILITY" else value
 
 
-def _date(value: object) -> tuple[float, str]:
+def _date(value: object) -> tuple[datetime | None, str]:
     text = str(value or "").strip()
+    return _utc_date(text), text
+
+
+def _utc_date(value: object) -> datetime | None:
+    """Read explanation dates without converting through platform timestamps."""
     try:
-        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        return parsed.timestamp(), text
-    except ValueError:
-        return float("-inf"), text
+        parsed = datetime.fromisoformat(str(value or "").strip().replace("Z", "+00:00"))
+        return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+    except (TypeError, ValueError, OverflowError):
+        return None
 
 
 def _as_dict(row: Mapping[str, Any] | Any) -> dict[str, Any]:
@@ -132,9 +135,14 @@ def _recent(rows: list[dict[str, Any]], active_accounts: list[str], maximum: int
     if maximum is not None and maximum < 1:
         return []
     result = []
+    minimum = datetime.min.replace(tzinfo=timezone.utc)
     for account in active_accounts:
         local = [row for row in rows if row["account_key"] == account]
-        local.sort(key=lambda row: (row["date_key"], row["match_id"]), reverse=True)
+        local.sort(key=lambda row: (
+            row["date_key"][0] is not None,
+            row["date_key"][0] or minimum,
+            row["match_id"],
+        ), reverse=True)
         result.extend(local if maximum is None else local[:maximum])
     return result
 
@@ -210,6 +218,10 @@ def build_recommendations(
     ``rows`` determine current preferences and displayed performance.  The
     separate ``lifetime_rows`` are used only to ensure discovery candidates
     have never been selected by any selected account.
+
+    ``recent_games`` limits each account's preference window by exact UTC
+    instant, then match ID. Undated rows follow dated rows. Original date
+    text remains available for explanations.
     """
     try:
         limit = max(int(limit), 0)
@@ -343,8 +355,14 @@ def build_recommendations(
         ]
         score = sum(shares) / len(scoring_accounts) if scoring_accounts else None
         recent_count = sum(len(affinity_by_account_champion[(account, champion)]) for account in active)
-        dates = [row["date_key"][1] for row in candidate_rows if row["date_key"][1]]
-        days = {value[:10] for value in dates}
+        dates = []
+        for row in candidate_rows:
+            original_date = row["date_key"][1]
+            played_at = _utc_date(original_date)
+            if played_at is not None:
+                dates.append((played_at, original_date))
+        days = {played_at.date() for played_at, _ in dates}
+        day_label = "giorno giocato" if len(days) == 1 else "giorni giocati"
         reasons = []
         if champion in likes:
             reasons.append("Preferenza esplicita positiva.")
@@ -352,8 +370,8 @@ def build_recommendations(
             reasons.extend([
                 f"{recent_count} partite recenti usate per la preferenza.",
                 f"{len(candidate_rows)} partite nel perimetro usate per la performance osservata.",
-                f"{len(days)} giorni giocati.",
-                f"Ultima partita: {max(dates)}." if dates else "Data dell'ultima partita non disponibile.",
+                f"{len(days)} {day_label} (UTC).",
+                f"Ultima partita: {max(dates)[1]}." if dates else "Data dell'ultima partita non disponibile.",
             ])
         else:
             reasons.append("Ancorato a una preferenza esplicita, senza partite inventate.")

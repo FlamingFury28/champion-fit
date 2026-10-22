@@ -107,7 +107,7 @@ def _top_picks(training: list[dict], holdout: list[dict], fit: dict) -> dict:
         account[0] += row["win"]
         account[1] += 1
 
-    recent_patch = max(training, key=lambda row: row["date"])["patch"] if training else ""
+    recent_patch = max(training, key=lambda row: datetime.fromisoformat(row["date"]))["patch"] if training else ""
     candidates_by_account_role = defaultdict(list)
     for (account, role, champion), (wins, games) in candidate_counts.items():
         representative = {
@@ -195,6 +195,7 @@ def replay_fold(observations: list[Observation], start: datetime, end: datetime,
         "holdout_observations": len(holdout),
         "holdout_unique_matches": len(holdout_matches),
         "match_ids_separated": not bool(training_matches & holdout_matches),
+        "fit_diagnostics": fit["diagnostics"],
         "scores": _scores(holdout, predictions),
         "top_picks": _top_picks(training, holdout, fit),
     }
@@ -242,6 +243,14 @@ def validate(observations: list[Observation], *, selection_start: str,
         },
         "folds": folds,
         "promotion_gates": gates,
+        "solver_diagnostics": {
+            "evaluated_folds": len(evaluated),
+            "converged_folds": sum(fold["fit_diagnostics"]["converged"] for fold in evaluated),
+            "max_final_gradient": max((fold["fit_diagnostics"]["gradient_max_abs"]
+                                       for fold in evaluated), default=None),
+            "diagnostic_only": True,
+            "changes_active_model_validation": False,
+        },
         "validated": gate_passed,
         "status": "validated" if gate_passed else "exploratory",
         "limits": [

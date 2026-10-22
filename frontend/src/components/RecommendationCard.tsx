@@ -7,6 +7,7 @@ import { recommendationEvidenceQuery } from '../api/queries'
 import type { RecommendationDto } from '../api/types'
 import { formatDate, pct } from '../app/filters'
 import { credibleBounds, credibleMassLabel, useAlgorithmSettings } from '../app/algorithm-settings'
+import { evidenceThresholds, meaningfulDeltaPoints } from '../app/reliability'
 import { championHref } from '../app/navigation'
 import { useContentMotion } from '../app/surface-motion'
 import { queueLabel, roleLabel, translateModelText } from '../app/labels'
@@ -33,7 +34,9 @@ export function RecommendationCard(props: RecommendationCardProps) {
 }
 
 function ScopedRecommendationCard({ item, scope, rank = 1, conflict = false, explanationOnly = false }: RecommendationCardProps) {
-  const { credibleMass } = useAlgorithmSettings()
+  const { credibleMass, settings } = useAlgorithmSettings()
+  const thresholds = evidenceThresholds(settings)
+  const deltaPoints = meaningfulDeltaPoints(item.meaningful_delta, thresholds)
   const interval = credibleBounds(item)
   const intervalLabel = credibleMassLabel(item.credible_mass ?? credibleMass)
   const [params] = useSearchParams()
@@ -83,7 +86,7 @@ function ScopedRecommendationCard({ item, scope, rank = 1, conflict = false, exp
           </div>
           <div className="recommendation-interval__scale" aria-hidden="true"><span>0%</span><span>100%</span></div>
           <p>Percentuale di vittorie osservata {pct(item.raw_win_rate, 1)} · riferimento {pct(item.baseline_win_rate, 1)}. La stima usa gli esiti delle partite con un’ipotesi iniziale prudente; un intervallo ampio indica incertezza.</p>
-          <p>{item.probabilities_are_lower_bounds ? 'Limite inferiore della probabilità' : 'Probabilità'} di superare il riferimento di almeno 3 punti percentuali: {pct(item.probability_meaningful_advantage, 1)} · soglia richiesta {pct(item.decision_threshold, 1)}. Servono anche almeno 20 partite personali distinte: il solo piazzamento in classifica non rende il segnale operativo.</p>
+          <p>{item.probabilities_are_lower_bounds ? 'Limite inferiore della probabilità' : 'Probabilità'} di superare il riferimento di almeno {deltaPoints} punti percentuali: {pct(item.probability_meaningful_advantage, 1)} · soglia richiesta {pct(item.decision_threshold, 1)}. Servono anche almeno {thresholds.minGames} partite personali distinte: il solo piazzamento in classifica non rende il segnale operativo.</p>
           {item.probabilities_are_lower_bounds ? <p>Gli account hanno uguale peso. Un limite inferiore basso non significa che la probabilità reale sia così bassa: indica che i dati non permettono di garantirne una maggiore. Copertura: {item.observed_account_count} su {item.account_count} account.</p> : null}
         </div>
         {explanation ? (
@@ -112,7 +115,7 @@ function ScopedRecommendationCard({ item, scope, rank = 1, conflict = false, exp
                       <thead><tr><th>Partita</th><th>Esito</th><th>Contributo alla revisione</th><th>Motivo del peso</th></tr></thead>
                       <tbody>{evidence.data.items.map((match) => (
                         <tr key={`${match.account}-${match.match_id}`}>
-                          <th scope="row"><span className="recommendation-match__id">{match.match_id}</span><small><span>{match.account}</span> · <time dateTime={match.date}>{formatDate(match.date)}</time></small><small>{queueLabel(match.queue)} · {number(match.duration_minutes)} min</small></th>
+                          <th scope="row"><span className="recommendation-match__id">{match.match_id}</span><small><span>{match.account}</span> · <time dateTime={match.date_utc ?? match.date}>{formatDate(match.date_utc ?? match.date)}</time></small><small>{queueLabel(match.queue)} · {number(match.duration_minutes)} min</small></th>
                           <td><StatusBadge tone={match.win ? 'positive' : 'negative'}>{match.win ? 'Vittoria' : 'Sconfitta'}</StatusBadge></td>
                           <td><strong>Peso {weight(match.evidence_weight)}</strong><small>{contributionLabels[match.contribution]}</small></td>
                           <td>{translateModelText(match.weight_reason)}</td>

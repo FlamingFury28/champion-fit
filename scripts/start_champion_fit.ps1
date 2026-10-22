@@ -22,7 +22,7 @@ function Write-StartupLog([string]$Message) {
 function Test-ChampionFitPage {
     try {
         $response = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 2
-        return ($response.StatusCode -eq 200)
+        return ($response.StatusCode -eq 200 -and $response.Content -match '<title>\s*Champion Fit(?:\s|<)')
     }
     catch {
         return $false
@@ -38,6 +38,9 @@ try {
         (Join-Path $frontendRoot 'vite.config.ts')
     ) | Where-Object { Test-Path -LiteralPath $_ }
     $frontendInputs += Get-ChildItem (Join-Path $frontendRoot 'src') -Recurse -File | Select-Object -ExpandProperty FullName
+    if (Test-Path -LiteralPath (Join-Path $frontendRoot 'public') -PathType Container) {
+        $frontendInputs += Get-ChildItem -LiteralPath (Join-Path $frontendRoot 'public') -Recurse -File | Select-Object -ExpandProperty FullName
+    }
 
     $needsBuild = -not (Test-Path -LiteralPath $distIndex)
     if (-not $needsBuild) {

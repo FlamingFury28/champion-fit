@@ -5,17 +5,22 @@ import { matchupsQuery } from '../api/queries'
 import { championHref } from '../app/navigation'
 import { normalizeRole, pct, ROLES } from '../app/filters'
 import { queueLabel, roleLabel } from '../app/labels'
+import { canonicalQueueFilter } from '../app/queue-filter'
 import { selectActionableBan, signedPoints } from '../app/presentation'
 import { useScope } from '../app/scope'
 import { MatchupList } from '../components/MatchupList'
 import { DecisionSummary, EmptyState, ErrorState, MetricCard, PageHeader, QueryResults, RefreshNotice, Skeleton, StatusBadge, Surface } from '../components/ui'
 
+const queueOptions = ['420', '440', '400', '430', '490', '480', '700']
+
 export function ChampionsPage({ embedded = false }: { embedded?: boolean }) {
   const { scope, scopeReady, availableAccounts } = useScope()
   const [params, setParams] = useSearchParams()
   const explicitRole = params.has('role') ? normalizeRole(params.get('role')) : 'ALL'
-  const queue = params.get('queue') ?? 'all'
+  const queue = canonicalQueueFilter(params.get('queue')) ?? 'all'
+  const queueKnown = queue === 'all' || queueOptions.includes(queue)
   const days = params.get('days') ?? 'all'
+  const daysKnown = ['all', '90', '180', '365'].includes(days)
   const contextFilters = { queue, days }
   const matchups = useQuery({ ...matchupsQuery(scope, 'ALL', explicitRole, contextFilters), enabled: scopeReady })
   const role = explicitRole
@@ -24,6 +29,7 @@ export function ChampionsPage({ embedded = false }: { embedded?: boolean }) {
   const candidateToWatch = matchups.data?.loses_to.find((item) => item.losses_to > 0)
   const banLift = actionableBan?.posterior_lift_pp ?? actionableBan?.relative_delta_pp ?? 0
   const transitioning = matchups.isPlaceholderData
+  const championSelectionReady = Boolean(matchups.data) && !transitioning && !matchups.isError
   const roleName = role === 'ALL' ? 'tutti i ruoli' : roleLabel(role)
   const updateRole = (value: string) => setParams((current) => { const next = new URLSearchParams(current); if (value === 'ALL') next.delete('role'); else next.set('role', value); return next }, { replace: true })
   const updateContext = (key: 'queue' | 'days', value: string) => setParams((current) => {
@@ -43,6 +49,17 @@ export function ChampionsPage({ embedded = false }: { embedded?: boolean }) {
   return (
     <div className="page-stack">
       <PageHeader level={embedded ? 2 : 1} eyebrow="Campioni / Avversari" title="Avversari e ban" copy="Scopri quali avversari ti mettono in difficoltà. Ruolo, modalità e periodo definiscono i confronti; per un campione specifico apri la sua scheda." />
+      <Surface className="champion-selector-panel" id="champion-selector">
+        <div><Swords aria-hidden="true" /><div><p className="eyebrow">Cambia la domanda</p><h2>Filtra la risposta</h2></div></div>
+        <label>Ruolo<select value={explicitRole} onChange={(event) => updateRole(event.target.value)}>{ROLES.map((value) => <option key={value} value={value}>{roleLabel(value)}</option>)}</select></label>
+        <label>Modalità<select value={queue} onChange={(event) => updateContext('queue', event.target.value)}>{!queueKnown ? <option value={queue} disabled>{queue === '' ? 'Modalità predefinita' : 'Modalità del link'}</option> : null}<option value="all">Tutte le modalità</option>{queueOptions.map((value) => <option key={value} value={value}>{queueLabel(value)}</option>)}</select></label>
+        <label>Periodo<select value={days} onChange={(event) => updateContext('days', event.target.value)}>{!daysKnown ? <option value={days} disabled>{days === '' ? 'Periodo predefinito' : 'Periodo del link'}</option> : null}<option value="all">Tutto lo storico</option><option value="90">Ultimi 90 giorni</option><option value="180">Ultimi 180 giorni</option><option value="365">Ultimi 365 giorni</option></select></label>
+        <label>Che campione vuoi giocare?<select value="" disabled={!championSelectionReady} onChange={(event) => event.target.value && navigate(championHref(event.target.value, role, params, { queue: context?.queue ?? queue, days: context?.days ?? days }), { state: { championSheetFromList: true } })}>
+          <option value="">{matchups.isPending || transitioning ? 'Aggiornamento dei campioni…' : championSelectionReady ? 'Scegli un campione specifico…' : 'Campioni non disponibili'}</option>
+          {championSelectionReady ? matchups.data?.available_champions.map((item) => <option key={item.champion} value={item.champion}>{item.champion} · {item.games} partite</option>) : null}
+        </select></label>
+        {matchups.data ? <p className="context-note" role="status">Contesto effettivo: {roleLabel(context?.role ?? role)} · {queueLabel(context?.queue)} · {periodLabel}. {selectedAccountHistory != null ? `L’account selezionato ha ${selectedAccountHistory} partite analizzate nello storico locale.` : 'Il totale del profilo comprende anche altre modalità e periodi.'}</p> : null}
+      </Surface>
       {matchups.isPending ? <Skeleton lines={7} /> : null}
       {matchups.isError ? <ErrorState error={matchups.error} onRetry={() => void matchups.refetch()} /> : null}
       {matchups.data ? (
@@ -63,14 +80,6 @@ export function ChampionsPage({ embedded = false }: { embedded?: boolean }) {
           />
           {transitioning ? <RefreshNotice>I dati sotto appartengono al filtro precedente e restano visibili solo mentre aggiorno {roleName}.</RefreshNotice> : null}
           <QueryResults label="Risultati dei confronti con gli avversari" aria-busy={matchups.isFetching && !matchups.isPending}>
-            <Surface className="champion-selector-panel" id="champion-selector">
-              <div><Swords aria-hidden="true" /><div><p className="eyebrow">Cambia la domanda</p><h2>Filtra la risposta</h2></div></div>
-              <label>Ruolo<select value={explicitRole} onChange={(event) => updateRole(event.target.value)}>{ROLES.map((value) => <option key={value} value={value}>{roleLabel(value)}</option>)}</select></label>
-              <label>Modalità<select value={queue} onChange={(event) => updateContext('queue', event.target.value)}><option value="all">Tutte le modalità</option>{['420', '440', '400', '430', '490'].map((value) => <option key={value} value={value}>{queueLabel(value)}</option>)}</select></label>
-              <label>Periodo<select value={days} onChange={(event) => updateContext('days', event.target.value)}><option value="all">Tutto lo storico</option><option value="90">Ultimi 90 giorni</option><option value="180">Ultimi 180 giorni</option><option value="365">Ultimi 365 giorni</option></select></label>
-              <label>Che campione vuoi giocare?<select value="" disabled={transitioning} onChange={(event) => event.target.value && navigate(championHref(event.target.value, role, params), { state: { championSheetFromList: true } })}><option value="">{transitioning ? 'Aggiornamento dei campioni…' : 'Scegli un campione specifico…'}</option>{!transitioning ? matchups.data.available_champions.map((item) => <option key={item.champion} value={item.champion}>{item.champion} · {item.games} partite</option>) : null}</select></label>
-              <p className="context-note" role="status">Contesto effettivo: {roleLabel(context?.role ?? role)} · {queueLabel(context?.queue)} · {periodLabel}. {selectedAccountHistory != null ? `L’account selezionato ha ${selectedAccountHistory} partite analizzate nello storico locale.` : 'Il totale del profilo comprende anche altre modalità e periodi.'}</p>
-            </Surface>
             {matchups.data.games ? (
               <div className="matchup-grid" id="ban-evidence">
                 <Surface><div className="section-heading"><div><p className="eyebrow">La risposta / rischio</p><h2>Ti mette più in difficoltà</h2></div><StatusBadge tone={actionableBan ? 'negative' : 'warning'}>{actionableBan ? 'da bannare per primo' : 'da verificare'}</StatusBadge></div><MatchupList items={matchups.data.loses_to} direction="loses" /></Surface>

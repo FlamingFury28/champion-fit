@@ -9,7 +9,7 @@ vi.mock('../app/scope', () => ({ useScope: () => ({ scope: { accounts: ['Alpha#E
 const payload = {
   items: [{
     champion: 'Ahri', role: 'MIDDLE', icon_url: '/Ahri.png', games_observed: 4, unique_games: 4,
-    raw_win_rate: 75, posterior_win_rate: 56.2, credible_lower_90: 40, credible_upper_90: 70,
+    raw_win_rate: 75, posterior_win_rate: 56.2, credible_lower_90: 40, credible_upper_90: 70, credible_mass: 0.9,
     posterior_lift_pp: 6.2, probability_meaningful_advantage: 61, historical_supported: false,
     classification: 'promising', account_coverage: 1, account_count: 1,
   }],
@@ -25,7 +25,7 @@ function renderPage(url = '/app/fit?section=best&role=MIDDLE&queue=440&days=90')
   return fetch
 }
 
-afterEach(() => { payload.items[0]!.posterior_lift_pp = 6.2; cleanup(); vi.unstubAllGlobals() })
+afterEach(() => { payload.items[0]!.posterior_lift_pp = 6.2; payload.items[0]!.credible_mass = 0.9; cleanup(); vi.unstubAllGlobals() })
 
 describe('rendimento dei campioni', () => {
   it('mostra stima, intervallo, stato esplorativo e contesto esplicito', async () => {
@@ -55,5 +55,24 @@ describe('rendimento dei campioni', () => {
     const row = await screen.findByRole('row', { name: /Ahri/ })
     expect(row).toHaveTextContent('0%')
     expect(row).not.toHaveTextContent('-0%')
+  })
+
+  it('descrive la massa effettiva restituita senza fissare il 90%', async () => {
+    payload.items[0]!.credible_mass = .8
+    renderPage()
+    expect(await screen.findByRole('columnheader', { name: 'Intervallo 80%' })).toBeVisible()
+    expect(screen.queryByRole('columnheader', { name: 'Intervallo 90%' })).not.toBeInTheDocument()
+  })
+
+  it('mantiene i default della lista e passa il contesto risolto soltanto alla scheda', async () => {
+    renderPage('/app/fit?section=best')
+    const link = await screen.findByRole('link', { name: /Ahri/ })
+    const target = new URL(link.getAttribute('href')!, 'http://localhost')
+    expect(target.searchParams.get('detailQueue')).toBe('440')
+    expect(target.searchParams.get('detailDays')).toBe('90')
+    expect(target.searchParams.has('queue')).toBe(false)
+    expect(target.searchParams.has('days')).toBe(false)
+    expect(screen.getByLabelText('Modalità')).toHaveValue('')
+    expect(screen.getByLabelText('Periodo')).toHaveValue('')
   })
 })

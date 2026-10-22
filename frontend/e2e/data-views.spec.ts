@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
+import type { PlaystylesResponse } from '../src/api/playstyles'
 
 const DATA_VIEW_STORAGE_KEY = 'champion-fit:data-view:v2'
 
@@ -28,8 +29,10 @@ async function routeFriends(page: Page) {
 
 async function fresh(page: Page, route: string, id: string) {
   await page.goto(route)
-  await page.reload()
   const region = explorer(page, id)
+  await expect(region).toBeVisible()
+  await expect(page.locator('#main-content .skeleton')).toHaveCount(0)
+  await page.reload()
   await expect(region).toBeVisible()
   await expect(page.locator('#main-content .skeleton')).toHaveCount(0)
   return region
@@ -83,6 +86,91 @@ test('Compagni conserva lo stesso insieme in elenco, schede, barre e mappa', asy
   const firstPoint = region.locator('.data-explorer__point').first()
   await firstPoint.click()
   await expect(region.locator('.data-explorer__inspection')).toContainText('MoltePartite#EUW')
+})
+
+test('percentuali e intervalli conservano valori e copertura passando fra le viste @smoke', async ({ page }, testInfo) => {
+  const requests: string[] = []
+  await page.route('**/api/**', async (route) => {
+    if (route.request().method() === 'GET') await route.fallback()
+    else await route.abort()
+  })
+  await page.route('**/api/friends?**', async (route) => {
+    requests.push(route.request().url())
+    const response = await route.fetch()
+    const body = await response.json() as { items: Array<Record<string, unknown>> }
+    expect(body.items.length).toBeGreaterThan(0)
+    body.items = [{ ...body.items[0], friend: 'StessoDato#EUW', friend_key: 'same-values',
+      shared_games: 20, friend_win_rate: 60, posterior_win_rate: 62.75,
+      credible_lower: 40.25, credible_upper: 76.85, credible_mass: .955,
+      credible_lower_90: 28, credible_upper_90: 88, baseline_win_rate: 50 }]
+    await route.fulfill({ response, json: body })
+  })
+  const region = await fresh(page, '/app/team/friends?min_games=1', 'friends-ranking')
+  const row = region.getByRole('row', { name: /StessoDato#EUW/ })
+  await expect(row).toContainText('62,8%')
+  await expect(row).toContainText('95,5% · 40,3%–76,9%')
+  const callCount = requests.length
+
+  for (const view of ['Schede', 'Barre', 'Mappa'] as const) {
+    await choose(page, view)
+    await expectView(region, view)
+    const card = view === 'Schede' ? region.locator('.data-explorer__cards > article') : region.locator('.data-explorer__inspection > article')
+    await expect(card.locator('.data-explorer__card-value strong')).toHaveText('62,8%')
+    await expect(card.locator('.data-explorer__facts')).toContainText('Intervallo 95,5%')
+    await expect(card.locator('.data-explorer__facts')).toContainText('40,3–76,9%')
+    await expect(card.locator('.data-explorer__facts')).not.toContainText('28–88%')
+    if (view === 'Barre') {
+      await expect(region.locator('.data-explorer__legend')).toContainText('95,5%')
+      const interval = await region.locator('.data-explorer__interval').evaluate((element) => ({
+        left: parseFloat((element as HTMLElement).style.left), width: parseFloat((element as HTMLElement).style.width),
+      }))
+      await expect(region.locator('.data-explorer__chart-title')).toContainText('0–100%')
+      expect(interval.left).toBeCloseTo(40.25)
+      expect(interval.width).toBeCloseTo(76.85 - 40.25)
+    }
+    if (view === 'Mappa') {
+      const position = await region.locator('.data-explorer__point').evaluate((element) => parseFloat((element as HTMLElement).style.bottom))
+      expect(position).toBeCloseTo(62.75)
+    }
+  }
+  expect(requests).toHaveLength(callCount)
+  await page.screenshot({ path: testInfo.outputPath('percentages-and-intervals.png'), fullPage: true })
+})
+
+test('gli intervalli binomiali degli stili conservano copertura e limiti in tutte le viste @smoke', async ({ page }) => {
+  const requests: string[] = []
+  await page.route('**/api/**', async (route) => {
+    if (route.request().method() === 'GET') await route.fallback()
+    else await route.abort()
+  })
+  await page.route('**/api/playstyles?**', async (route) => {
+    requests.push(route.request().url())
+    const response = await route.fetch()
+    const body = await response.json() as PlaystylesResponse
+    const category = body.categories.find((item) => item.mean != null)
+    expect(category).toBeDefined()
+    body.categories = [{ ...category!, label: 'Stile di verifica', mean: 61.25,
+      lower: 42.25, upper: 74.85, credible_mass: .955, lower_90: 30, upper_90: 85,
+      baseline_mean: 50, baseline_games: 8, baseline_lower: 41, baseline_upper: 61 }]
+    await route.fulfill({ response, json: body })
+  })
+  const region = await fresh(page, '/app/matches?section=style&days=all&queue=all', 'playstyle-archetypes')
+  await expect(region.locator('.playstyles-estimate strong')).toHaveText('61,3%')
+  await expect(region.locator('.playstyles-estimate')).toContainText('intervallo binomiale al 95,5% 42,3–74,9%')
+  const callCount = requests.length
+  for (const view of ['Schede', 'Barre', 'Mappa'] as const) {
+    await choose(page, view)
+    await expectView(region, view)
+    const card = view === 'Schede' ? region.locator('.data-explorer__cards > article') : region.locator('.data-explorer__inspection > article')
+    await expect(card.locator('.data-explorer__card-value strong')).toHaveText('61,3%')
+    await expect(card.locator('.data-explorer__facts')).toContainText('Intervallo binomiale al 95,5%')
+    await expect(card.locator('.data-explorer__facts')).toContainText('42,3–74,9%')
+    if (view === 'Barre') await expect(region.locator('.data-explorer__legend')).toContainText('Intervallo binomiale al 95,5%')
+    const details = card.getByRole('button', { name: 'Perché Stile di verifica?', exact: true })
+    if (await details.getAttribute('aria-expanded') === 'false') await details.click()
+    await expect(card.getByText(/Riferimento osservato: 50% · intervallo binomiale al 95,5% 41–61%/)).toBeVisible()
+  }
+  expect(requests).toHaveLength(callCount)
 })
 
 test('la vista globale persiste dopo reload e navigazione interna', async ({ page }) => {

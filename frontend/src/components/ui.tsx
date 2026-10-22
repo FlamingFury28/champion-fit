@@ -140,12 +140,12 @@ export function EvidenceBar({
 }
 
 export function ChampionAvatar({ name, src, size = 'md' }: { name: string; src?: string; size?: 'sm' | 'md' | 'lg' }) {
-  const [failed, setFailed] = useState(false)
+  const [failedSource, setFailedSource] = useState<string>()
   const initials = name.replace(/[^A-Z]/g, '').slice(0, 2) || name.slice(0, 2).toUpperCase()
   return (
     <span className="champion-avatar" data-size={size} role="img" aria-label={name}>
-      {src && !failed ? (
-        <img src={src} alt="" loading="lazy" onError={() => setFailed(true)} />
+      {src && src !== failedSource ? (
+        <img src={src} alt="" loading="lazy" onError={() => setFailedSource(src)} />
       ) : (
         <span aria-hidden="true">{initials || <ImageOff size={14} />}</span>
       )}
@@ -207,12 +207,53 @@ interface OverlayProps extends PropsWithChildren {
   description?: string
 }
 
+function isAvailableFocusTarget(element: HTMLElement | null): element is HTMLElement {
+  if (!element?.isConnected || element.matches(':disabled') || element.closest('[inert]')) return false
+  if (typeof element.checkVisibility === 'function') {
+    return element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })
+  }
+  const visibility = getComputedStyle(element).visibility
+  if (visibility === 'hidden' || visibility === 'collapse') return false
+  for (let current: HTMLElement | null = element; current; current = current.parentElement) {
+    const style = getComputedStyle(current)
+    if (style.display === 'none' || style.opacity === '0' || style.contentVisibility === 'hidden') return false
+  }
+  return true
+}
+
+function useOverlayReturnFocus() {
+  const opener = useRef<HTMLElement | null>(null)
+  const content = useRef<HTMLElement | null>(null)
+  return {
+    onOpenAutoFocus(event: Event) {
+      content.current = event.target instanceof HTMLElement ? event.target : null
+      const active = document.activeElement
+      opener.current = active instanceof HTMLElement && active !== document.body
+        && !content.current?.contains(active) ? active : null
+    },
+    onCloseAutoFocus(event: Event) {
+      event.preventDefault()
+      const active = document.activeElement
+      // Route navigation or another dialog may already have chosen a target.
+      if (active instanceof HTMLElement && active !== document.body && isAvailableFocusTarget(active)
+        && !content.current?.contains(active)) return
+      if (isAvailableFocusTarget(opener.current)) {
+        opener.current.focus({ preventScroll: true })
+        if (document.activeElement === opener.current) return
+      }
+      const fallback = document.getElementById('main-content')
+      if (isAvailableFocusTarget(fallback)) fallback.focus({ preventScroll: true })
+    },
+  }
+}
+
 export function Modal({ open, onOpenChange, title, description, children }: OverlayProps) {
+  const returnFocus = useOverlayReturnFocus()
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content className="dialog-content">
+        <Dialog.Content className="dialog-content" {...returnFocus}>
           <div className="dialog-heading">
             <div>
               <Dialog.Title>{title}</Dialog.Title>
@@ -230,11 +271,12 @@ export function Modal({ open, onOpenChange, title, description, children }: Over
 }
 
 export function Drawer({ open, onOpenChange, title, description, children, wide = false }: OverlayProps & { wide?: boolean }) {
+  const returnFocus = useOverlayReturnFocus()
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
-          <Dialog.Content className={`drawer-content${wide ? ' drawer-content--wide' : ''}`}>
+          <Dialog.Content className={`drawer-content${wide ? ' drawer-content--wide' : ''}`} {...returnFocus}>
           <div className="dialog-heading">
             <div>
               <Dialog.Title>{title}</Dialog.Title>

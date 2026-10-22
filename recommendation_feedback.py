@@ -13,7 +13,9 @@ import unicodedata
 from typing import Any
 
 from account_identity import canonical_account_name
+from analysis_runtime import parse_time
 from champion_taxonomy import canonical_champion, champion_entry, load_catalog
+from storage import SQL_INTEGER_MAX
 
 
 ROLES = {"TOP", "JUNGLE", "MIDDLE", "BOTTOM", "SUPPORT"}
@@ -34,6 +36,12 @@ def _row_value(row: Any, key: str, index: int) -> Any:
         return row[key]
     except (KeyError, TypeError, IndexError):
         return row[index]
+
+
+def _updated_at_key(value: str) -> tuple[bool, datetime, str]:
+    """Order exact UTC instants; retain raw-text ties and invalid-only fallback."""
+    parsed = parse_time(value)
+    return parsed is not None, parsed or datetime.min.replace(tzinfo=timezone.utc), value
 
 
 def _riot_key(value: object) -> str:
@@ -61,6 +69,8 @@ def _validated_accounts(accounts: object) -> list[str]:
     for value in accounts:
         if not isinstance(value, str) or not value.strip():
             raise ValueError("accounts must contain only nonempty strings")
+        if "\x00" in value:
+            raise ValueError("accounts must not contain NUL")
         account = value.strip()
         key = _account_key(account)
         if key not in seen:
@@ -220,7 +230,7 @@ def reconcile_feedback_identity(
             ),
             reverse=True,
         )[0]
-        updated_at = max(str(_row_value(row, "updated_at", 5)) for row in rows)
+        updated_at = max((str(_row_value(row, "updated_at", 5)) for row in rows), key=_updated_at_key)
         reconciled.append((
             identity_key,
             canonical_account,
@@ -420,15 +430,6 @@ def _suspended_identity_ids(connection: Any) -> set[str]:
     }
 
 
-def _state_revision(connection: Any) -> int:
-    row = connection.execute(
-        "SELECT revision FROM recommendation_feedback_state WHERE singleton_id=1"
-    ).fetchone()
-    if row is None:
-        raise RuntimeError("recommendation feedback store is not initialized")
-    return int(_row_value(row, "revision", 0))
-
-
 def _snapshot(connection: Any, accounts: object) -> dict[str, Any]:
     resolved = _resolved_accounts(connection, accounts, for_write=False)
     suspended = _suspended_identity_ids(connection)
@@ -448,11 +449,20 @@ def _snapshot(connection: Any, accounts: object) -> dict[str, Any]:
     }
     items = []
     seen = set()
+    revision = None
+    # A conflict releases its CAS savepoint before reading this snapshot. Keep
+    # the projection and revision in one statement even under READ COMMITTED.
+    # LEFT JOIN also retains the revision when the preference store is empty.
     rows = connection.execute(
-        "SELECT identity_key,account,champion,role,preference,updated_at "
-        "FROM recommendation_preferences ORDER BY account,champion,role"
+        "SELECT p.identity_key,p.account,p.champion,p.role,p.preference,p.updated_at,s.revision "
+        "FROM recommendation_feedback_state s LEFT JOIN recommendation_preferences p ON 1=1 "
+        "WHERE s.singleton_id=1 ORDER BY p.account,p.champion,p.role"
     )
     for row in rows:
+        if revision is None:
+            revision = int(_row_value(row, "revision", 6))
+        if _row_value(row, "identity_key", 0) is None:
+            continue
         identity_key = str(_row_value(row, "identity_key", 0))
         stored_account = str(_row_value(row, "account", 1))
         if identity_key in current_identities:
@@ -473,8 +483,10 @@ def _snapshot(connection: Any, accounts: object) -> dict[str, Any]:
             "preference": str(_row_value(row, "preference", 4)),
             "updated_at": str(_row_value(row, "updated_at", 5)),
         })
+    if revision is None:
+        raise RuntimeError("recommendation feedback store is not initialized")
     items.sort(key=lambda item: (item["account"].casefold(), item["champion"], item["role"]))
-    return {"revision": _state_revision(connection), "items": items}
+    return {"revision": revision, "items": items}
 
 
 def read_feedback(connection: Any, accounts: list[str]) -> dict[str, Any]:
@@ -633,6 +645,10 @@ def _validated_champion(
     """
     if not isinstance(value, str) or not value.strip():
         raise ValueError("champion must be a known champion string")
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError as error:
+        raise ValueError("champion must be a known champion string") from error
     champion = canonical_champion(value)
     if champion_entry(champion) is not None:
         return champion
@@ -721,8 +737,8 @@ def save_feedback(
     append-only event stream unchanged.  The function releases only its own
     savepoint; the surrounding transaction remains the caller's responsibility.
     """
-    if type(expected_revision) is not int or expected_revision < 0:
-        raise ValueError("expected_revision must be a non-negative integer")
+    if type(expected_revision) is not int or not 0 <= expected_revision <= SQL_INTEGER_MAX:
+        raise ValueError(f"expected_revision must be an integer between 0 and {SQL_INTEGER_MAX}")
     requested_accounts = _validated_accounts(accounts)
     role = _validated_role(role)
     preference = _validated_preference(preference)

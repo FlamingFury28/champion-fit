@@ -44,7 +44,9 @@ interface AlgorithmSettingsContextValue {
   settings: AlgorithmSettings
   credibleMass: number
   isPending: boolean
+  isFetching: boolean
   error: Error | null
+  refreshError: Error | null
   refetch: () => Promise<unknown>
 }
 
@@ -52,7 +54,9 @@ const fallbackContext: AlgorithmSettingsContextValue = {
   settings: RECOMMENDED_ALGORITHM_SETTINGS,
   credibleMass: 0.9,
   isPending: false,
+  isFetching: false,
   error: null,
+  refreshError: null,
   refetch: async () => undefined,
 }
 
@@ -90,9 +94,11 @@ export function AlgorithmSettingsProvider({ children }: PropsWithChildren) {
     settings,
     credibleMass,
     isPending: query.isPending,
+    isFetching: query.isFetching,
     error: query.error,
+    refreshError: query.data ? query.error : null,
     refetch: query.refetch,
-  }), [credibleMass, query.data, query.error, query.isPending, query.refetch, settings])
+  }), [credibleMass, query.data, query.error, query.isFetching, query.isPending, query.refetch, settings])
   return <AlgorithmSettingsContext value={value}>{children}</AlgorithmSettingsContext>
 }
 
@@ -101,7 +107,7 @@ export function useAlgorithmSettings() {
 }
 
 export function credibleMassLabel(mass: number) {
-  return `${Math.round(mass * 100)}%`
+  return `${(mass * 100).toLocaleString('it-IT', { maximumFractionDigits: 3 })}%`
 }
 
 export function credibleBounds(item: {
@@ -110,8 +116,11 @@ export function credibleBounds(item: {
   credible_lower_90?: number | null
   credible_upper_90?: number | null
 }) {
+  if (item.credible_lower !== undefined || item.credible_upper !== undefined) {
+    return { lower: item.credible_lower ?? null, upper: item.credible_upper ?? null }
+  }
   return {
-    lower: item.credible_lower ?? item.credible_lower_90 ?? null,
-    upper: item.credible_upper ?? item.credible_upper_90 ?? null,
+    lower: item.credible_lower_90 ?? null,
+    upper: item.credible_upper_90 ?? null,
   }
 }

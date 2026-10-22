@@ -39,5 +39,9 @@ def test_temporal_validation_groups_matches_and_reports_every_required_metric():
             assert "calibration_bins" in model
         assert "hierarchical" in fold["top_picks"]
         assert fold["top_picks"]["hierarchical"]["unique_matches"] >= 0
+        assert "converged" in fold["fit_diagnostics"]
+        assert math.isfinite(fold["fit_diagnostics"]["gradient_max_abs"])
     assert report["protocol"]["shared_match_split"]
     assert report["status"] in {"validated", "exploratory"}
+    assert report["solver_diagnostics"]["diagnostic_only"]
+    assert not report["solver_diagnostics"]["changes_active_model_validation"]

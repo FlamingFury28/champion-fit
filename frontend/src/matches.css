@@ -1,4 +1,12 @@
-.matches-page { min-width: 0; }
+.matches-page { min-width: 0; gap: 20px; }
+.matches-page > .page-header { min-height: 0; padding-bottom: 18px; }
+.matches-page > .page-header h1 { font-size: clamp(36px, 3.5vw, 48px); }
+.matches-page > .context-note { margin: 0; padding: 6px 12px; color: var(--text-soft); font-size: 12px; line-height: 1.5; }
+.matches-filters { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) auto; align-items: end; gap: 12px; }
+.matches-filters label { display: grid; gap: 6px; min-width: 0; font-size: 12px; color: var(--text-soft); }
+.matches-filters select { width: 100%; min-width: 0; }
+.matches-pagination { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 12px; }
+.matches-pagination span { font-size: 12px; color: var(--text-soft); }
 .matches-page [id^="match-"] { scroll-margin-top: 150px; }
 .matches-page .page-header:has(h2) { min-height: 0; }
 .matches-page .page-header h2 { font-size: 28px; }
@@ -9,4 +17,8 @@
 .matches-role-grid strong { font-size: 16px; }
 .matches-role-grid span { color: var(--text-soft); font-size: 12px; }
 .matches-role-grid b { font-size: 13px; font-weight: 600; }
-@media (max-width: 700px) { .matches-roles { padding: 17px; } }
+@media (max-width: 700px) {
+  .matches-roles { padding: 17px; }
+  .matches-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .matches-filters .button { grid-column: 1 / -1; justify-self: end; min-height: 32px; }
+}

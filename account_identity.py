@@ -12,6 +12,9 @@ import sqlite3
 import unicodedata
 from datetime import datetime, timezone
 
+from analysis_runtime import parse_time
+from storage import postgres_table_exists
+
 
 class AccountIdentityConflict(ValueError):
     """Ownership is ambiguous or the user has suspended its reconciliation."""
@@ -28,9 +31,7 @@ def _key(value: str) -> str:
 
 def _exists(connection, table: str) -> bool:
     if hasattr(connection, "raw"):
-        return bool(connection.execute(
-            "SELECT 1 FROM information_schema.tables WHERE table_name=?", (table,),
-        ).fetchone())
+        return postgres_table_exists(connection, table)
     return bool(connection.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,),
     ).fetchone())
@@ -144,6 +145,18 @@ def _ids(value) -> list[str]:
     if not isinstance(values, list):
         return []
     return list(dict.fromkeys(str(item).strip() for item in values if item and str(item).strip()))
+
+
+def _newest_rows(rows, timestamp_field: str, canonical: str):
+    """Prefer valid UTC instants, then canonical rows and stable alias order."""
+    rows = sorted(rows, key=lambda row: (row["account"] != canonical, row["account"]))
+    minimum = datetime.min.replace(tzinfo=timezone.utc)
+
+    def recency(row):
+        instant = parse_time(row[timestamp_field])
+        return instant is not None, instant if instant is not None else minimum
+
+    return sorted(rows, key=recency, reverse=True)
 
 
 def _verified_historical_puuids(connection, puuid: str) -> set[str]:
@@ -305,9 +318,10 @@ def _reconcile_account_identity(connection, account: str, puuid: str,
         for row_id in keep.values():
             connection.execute("UPDATE match_quality SET account=? WHERE id=?", (canonical, row_id))
         lists: dict[str, dict] = {}
-        for row in connection.execute(
-            f"SELECT * FROM riot_match_list_raw WHERE account IN ({placeholders}) ORDER BY fetched_at DESC", params,
-        ):
+        fetched_lists = connection.execute(
+            f"SELECT * FROM riot_match_list_raw WHERE account IN ({placeholders})", params,
+        )
+        for row in _newest_rows(fetched_lists, "fetched_at", canonical):
             item = lists.setdefault(str(row["puuid"]), {"ids": [], "fetched_at": row["fetched_at"]})
             item["ids"].extend(_ids(row["match_ids_json"]))
         connection.execute(f"DELETE FROM riot_match_list_raw WHERE account IN ({placeholders})", params)
@@ -323,9 +337,9 @@ def _reconcile_account_identity(connection, account: str, puuid: str,
             "INSERT INTO riot_account_aliases VALUES(?,?,?,?,?,?) ON CONFLICT(account,normalized_riot_id,puuid) DO NOTHING",
             [(canonical, row["normalized_riot_id"], row["display_riot_id"], row["puuid"], row["verification_source"], row["verified_at"]) for row in aliases],
         )
-        states = list(connection.execute(
-            f"SELECT * FROM riot_match_materialization WHERE account IN ({placeholders}) ORDER BY last_attempt_at DESC", params,
-        ))
+        states = _newest_rows(connection.execute(
+            f"SELECT * FROM riot_match_materialization WHERE account IN ({placeholders})", params,
+        ), "last_attempt_at", canonical)
         connection.execute(f"DELETE FROM riot_match_materialization WHERE account IN ({placeholders})", params)
         for row in states:
             connection.execute(

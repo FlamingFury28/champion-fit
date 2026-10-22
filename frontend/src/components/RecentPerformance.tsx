@@ -6,6 +6,7 @@ import '../champion-experience.css'
 /** Compatible with both ProfileRecentMatchDto and ChampionRecentMatchDto. */
 export interface RecentPerformanceMatch {
   date: string
+  date_utc?: string | null
   win: 0 | 1 | boolean
   account: string
   role: string
@@ -21,13 +22,20 @@ interface ObservedDay {
 }
 
 function validTimestamp(value: string): number | undefined {
-  const date = /^(\d{4})-(\d{2})-(\d{2})(?:$|[T ])/.exec(value)
+  const date = /^(\d{4})-(\d{2})-(\d{2})(?:$|[T ](\d{2}):)/.exec(value)
   if (!date) return undefined
   const year = Number(date[1]), month = Number(date[2]), day = Number(date[3])
-  const calendar = new Date(Date.UTC(year, month - 1, day))
+  if (year < 1 || Number(date[4] ?? 0) > 23) return undefined
+  // Date.UTC treats years 0..99 as 1900..1999; the API preserves their year.
+  const calendar = new Date(0)
+  calendar.setUTCFullYear(year, month - 1, day)
   if (calendar.getUTCFullYear() !== year || calendar.getUTCMonth() !== month - 1 || calendar.getUTCDate() !== day) return undefined
-  const timestamp = Date.parse(value)
-  return Number.isFinite(timestamp) ? timestamp : undefined
+  // Legacy ISO timestamps without a zone follow the server's UTC convention.
+  const naive = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?$/.test(value)
+  const timestamp = Date.parse(naive ? `${value.replace(' ', 'T')}Z` : value)
+  if (!Number.isFinite(timestamp)) return undefined
+  const utcYear = new Date(timestamp).getUTCFullYear()
+  return utcYear >= 1 && utcYear <= 9999 ? timestamp : undefined
 }
 
 export function aggregateRecentPerformance(matches: readonly RecentPerformanceMatch[]) {
@@ -35,7 +43,7 @@ export function aggregateRecentPerformance(matches: readonly RecentPerformanceMa
   const seen = new Set<string>()
   let invalid = 0, duplicates = 0, withoutIdentity = 0
   const ordered = matches.flatMap((match) => {
-    const timestamp = validTimestamp(match.date)
+    const timestamp = validTimestamp(match.date_utc ?? match.date)
     if (timestamp === undefined || ![0, 1, true, false].includes(match.win)) {
       invalid += 1
       return []

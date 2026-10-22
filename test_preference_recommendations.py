@@ -143,6 +143,71 @@ def test_recent_preference_window_does_not_truncate_raw_performance_rows():
     assert sorted(len(candidate) for _, candidate in calls) == [1, 2]
 
 
+def test_familiar_latest_match_explanation_uses_instant_and_keeps_original_offset():
+    rows = [
+        row("one", "older", "A", date="2026-09-24T11:00:00+02:00"),
+        row("one", "newer", "A", date="2026-09-24T05:00:00-05:00"),
+    ]
+
+    item = build(rows)["known"][0]
+
+    assert "Ultima partita: 2026-09-24T05:00:00-05:00." in item["reasons"]
+    assert "1 giorno giocato (UTC)." in item["reasons"]
+    assert item["preference_score"] == 1
+    assert item["games"] == 2
+
+
+def test_familiar_day_explanation_merges_equivalent_iso_representations_in_utc():
+    rows = [
+        row("one", "utc", "A", date="2026-09-24T23:30:00Z"),
+        row("one", "next_local_day", "A", date="2026-09-25T01:30:00+02:00"),
+        row("one", "compact", "A", date="20260924T233000Z"),
+        row("one", "week", "A", date="2026-W39-4T23:30:00Z"),
+        row("one", "naive", "A", date="2026-09-24T23:30:00"),
+    ]
+
+    item = build(rows)["known"][0]
+    assert "1 giorno giocato (UTC)." in item["reasons"]
+    assert item["games"] == 5
+
+    rows.append(row("one", "next_utc_day", "A", date="2026-09-25T00:30:00Z"))
+    reasons = build(rows)["known"][0]["reasons"]
+    assert "2 giorni giocati (UTC)." in reasons
+    assert "Ultima partita: 2026-09-25T00:30:00Z." in reasons
+
+
+@pytest.mark.parametrize("invalid_date", [
+    None, "", "not a timestamp", "2026-02-30T12:00:00Z",
+    "0001-01-01T00:00:00+01:00", "9999-12-31T23:59:59-01:00",
+])
+def test_familiar_date_explanations_ignore_invalid_dates_without_removing_observations(invalid_date):
+    rows = [
+        row("one", "valid", "A", date="2026-09-24T10:00:00Z"),
+        row("one", "undated", "A", date=invalid_date),
+    ]
+
+    item = build(rows)["known"][0]
+    assert "1 giorno giocato (UTC)." in item["reasons"]
+    assert "Ultima partita: 2026-09-24T10:00:00Z." in item["reasons"]
+    assert item["games"] == 2
+
+    undated = build(rows[1:])["known"][0]
+    assert "0 giorni giocati (UTC)." in undated["reasons"]
+    assert "Data dell'ultima partita non disponibile." in undated["reasons"]
+    assert undated["games"] == 1
+
+
+def test_familiar_date_explanations_support_representable_utc_year_boundaries():
+    rows = [
+        row("one", "first", "A", date="0001-01-01T00:00:00Z"),
+        row("one", "last", "A", date="9999-12-31T23:59:59.999999Z"),
+    ]
+
+    reasons = build(rows)["known"][0]["reasons"]
+    assert "2 giorni giocati (UTC)." in reasons
+    assert "Ultima partita: 9999-12-31T23:59:59.999999Z." in reasons
+
+
 def test_observed_performance_is_called_separately_and_never_used_for_ordering():
     calls = []
     module = ModuleType("observed_performance")

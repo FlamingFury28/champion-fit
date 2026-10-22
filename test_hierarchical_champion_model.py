@@ -80,3 +80,112 @@ def test_logistic_normal_delta_gradient_includes_attenuation_derivative():
     expected = mean * (1.0 - mean) / attenuation
     assert gradients[("intercept", "")] == pytest.approx(expected)
     assert gradients[("account", "A")] == pytest.approx(expected)
+
+
+def test_supported_negative_history_is_not_a_positive_competitive_signal(monkeypatch):
+    import hierarchical_champion_model as model
+    rows = [{"account": "A", "match_id": f"{champion}-{i}", "champion": champion,
+             "role": "MIDDLE", "queue": "420", "patch": "16.1", "win": win}
+            for champion, win in (("Ahri", 0), ("Lux", 1)) for i in range(100)]
+    # Check both current exploratory and hypothetical validated branches.
+    for validated in (False, True):
+        monkeypatch.setattr(model, "MODEL_VALIDATED", validated)
+        items = {item["champion"]: item for item in model._predict(rows, ["A"], model._fit(rows), current_settings())["items"]}
+        negative = items["Ahri"]
+        assert negative["historical_performance"]["supported"]
+        assert negative["historical_direction"] == "worse"
+        assert not negative["historical_supported"]
+        assert not negative["actionable"]
+        assert not negative["validated_positive"]
+        assert negative["classification"] != "supported"
+        assert items["Lux"]["historical_supported"]
+
+
+def test_solver_reports_iteration_limit_and_final_gradient_independently(monkeypatch):
+    import hierarchical_champion_model as model
+    rows = [{"account": "A", "match_id": f"M{i}", "champion": "Ahri",
+             "role": "MIDDLE", "queue": "420", "patch": "16.1", "win": int(i < 8)}
+            for i in range(10)]
+    monkeypatch.setattr(model, "_MAX_ITERATIONS", 1)
+    fit = model._fit(rows)
+    diagnostic = fit["diagnostics"]
+    assert diagnostic["iterations"] == 1
+    assert not diagnostic["converged"]
+    assert diagnostic["final_max_change"] >= diagnostic["convergence_tolerance"]
+    # Reconstruct the final penalized intercept gradient from coefficients.
+    gradient = -fit["intercept"] / model._INTERCEPT_SD ** 2
+    for row in rows:
+        eta = fit["intercept"] + sum(fit["effects"][group][category]
+                                       for group, category in model._row_features(row).items())
+        gradient += row["win"] - model._logistic(eta)
+    assert diagnostic["gradient_max_abs"] >= abs(gradient) - 1e-12
+    assert model._fit([])["diagnostics"]["empty_sample"]
+    assert model.MODEL_VALIDATED is False
+
+
+def test_model_cache_singleflight_isolates_results_and_invalidates_inputs(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from copy import deepcopy
+    import threading
+    import hierarchical_champion_model as model
+    model._CACHE.clear()
+    rows = [{"account": "A", "match_id": "M1", "champion": "Ahri", "role": "MIDDLE",
+             "queue": "420", "patch": "16.1", "win": 1}]
+    started, release = threading.Event(), threading.Event()
+    calls = []
+    original = model._fit
+    def tracked(values):
+        calls.append(1)
+        started.set()
+        assert release.wait(5)
+        return original(values)
+    monkeypatch.setattr(model, "_fit", tracked)
+    with ThreadPoolExecutor(2) as pool:
+        first = pool.submit(model.analyze, rows, ["A"])
+        assert started.wait(5)
+        second = pool.submit(model.analyze, rows, ["A"])
+        release.set()
+        results = [first.result(timeout=5), second.result(timeout=5)]
+    assert len(calls) == 1
+    results[0]["items"].clear()
+    assert results[1]["items"]
+    assert model.analyze(rows, ["A"])["items"]
+    for field, value in (("win", 0), ("patch", "16.2"), ("champion", "Lux"),
+                         ("match_id", "M2"), ("queue", "440"), ("role", "TOP")):
+        changed = deepcopy(rows)
+        changed[0][field] = value
+        model.analyze(changed, ["A"])
+    model.analyze(rows, ["A", "B"])
+    settings = model._jsonable(model.current_settings())
+    settings["evidence"]["credible_mass"] = .8
+    monkeypatch.setattr(model, "current_settings", lambda: settings)
+    result = model.analyze(rows, ["A"])
+    assert result["items"][0]["credible_mass"] == .8
+    assert len(calls) == 9
+    assert len(model._CACHE) <= 8
+
+
+def test_model_failure_is_not_cached(monkeypatch):
+    import hierarchical_champion_model as model
+    model._CACHE.clear()
+    original = model._fit
+    def fail(rows):
+        raise ValueError("synthetic fit failure")
+    monkeypatch.setattr(model, "_fit", fail)
+    with pytest.raises(ValueError, match="synthetic"):
+        model.analyze([], ["A"])
+    monkeypatch.setattr(model, "_fit", original)
+    assert model.analyze([], ["A"])["diagnostics"]["empty_sample"]
+
+
+def test_model_timings_and_cache_hits_are_request_local():
+    import hierarchical_champion_model as model
+    from runtime_metrics import metrics_scope
+    model._CACHE.clear()
+    with metrics_scope("synthetic_model_test") as metrics:
+        model.analyze([], ["synthetic"])
+        model.analyze([], ["synthetic"])
+    assert metrics["model_fit_calls"] == 1
+    assert metrics["model_predict_calls"] == 1
+    assert metrics["model_fit_ms"] >= 0
+    assert metrics["model_cache_hit"] == 1

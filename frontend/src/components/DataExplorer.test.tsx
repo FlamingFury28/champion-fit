@@ -21,6 +21,32 @@ beforeEach(() => {
 afterEach(() => dataViewStore.dispose())
 
 describe('viste alternative dello stesso insieme di dati', () => {
+  it.each(['cards', 'bars', 'scatter'] as const)('conserva copertura e limiti propri del risultato nella vista %s', (view) => {
+    act(() => dataViewStore.setView(view))
+    render(explorer([{ ...items[0]!, intervalLabel: 'Intervallo 95,5%' }]))
+    expect(screen.getByText('Intervallo 95,5%')).toBeVisible()
+    expect(screen.getByText('45–75%')).toBeVisible()
+    expect(screen.queryByText('Intervallo 90%')).not.toBeInTheDocument()
+    if (view === 'bars') expect(screen.getByText(/Tratto sottile:/)).toHaveTextContent('95,5%')
+  })
+
+  it('una legenda con coperture diverse non attribuisce a tutti il valore globale', () => {
+    act(() => dataViewStore.setView('bars'))
+    render(explorer([
+      { ...items[0]!, intervalLabel: 'Intervallo 80%' },
+      { ...items[1]!, low: 30, high: 70, intervalLabel: 'Intervallo 95,5%' },
+    ]))
+    const legend = screen.getByText(/Tratto sottile:/)
+    expect(legend).toHaveTextContent('80%')
+    expect(legend).toHaveTextContent('95,5%')
+    expect(legend).not.toHaveTextContent('90%')
+  })
+
+  it('esclude dalla scala gli intervalli incompleti o invertiti che non vengono disegnati', () => {
+    expect(dataDomain([{ id: 'a', label: 'A', value: 20, low: 900, high: 10 }])).toEqual([0, 20])
+    expect(dataDomain([{ id: 'a', label: 'A', value: 20, high: 900 }])).toEqual([0, 20])
+  })
+
   it('usa la scelta globale al remount e mantiene azioni e contesto nelle schede', () => {
     const view = render(explorer())
     act(() => dataViewStore.setView('cards'))

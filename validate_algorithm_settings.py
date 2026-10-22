@@ -66,11 +66,19 @@ def _identity_key(value: object) -> str:
     return unicodedata.normalize("NFKC", str(value or "")).strip().casefold()
 
 
-def _utc(value: str) -> datetime:
+def _utc(value: object) -> datetime:
     parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def _utc_sort_value(value: object) -> str | None:
+    """Return an exactly sortable UTC instant; malformed source text stays invalid."""
+    try:
+        return _utc(value).isoformat(timespec="microseconds")
+    except (TypeError, ValueError, OverflowError):
+        return None
 
 
 def _date(value: str) -> datetime:
@@ -130,6 +138,7 @@ def load_observations(db_path: Path) -> tuple[list[Observation], dict]:
     try:
         connection.execute("PRAGMA query_only=ON")
         connection.execute("BEGIN")
+        connection.create_function("validation_utc", 1, _utc_sort_value, deterministic=True)
         identity_account: dict[str, str] = {}
         direct_identity: dict[str, str] = {}
         puuid_identity: dict[str, str] = {}
@@ -179,10 +188,12 @@ def load_observations(db_path: Path) -> tuple[list[Observation], dict]:
         patch_expression = "m.patch" if "patch" in match_quality_columns else "''"
         rows = connection.execute(
             f"""WITH global_match_time AS (
-                   SELECT match_id,MIN(date) occurred_at
+                   SELECT match_id,MIN(validation_utc(date)) occurred_at,
+                          COUNT(*)!=COUNT(validation_utc(date)) invalid_dates
                    FROM match_quality GROUP BY match_id
                )
-               SELECT m.account,m.match_id,t.occurred_at,m.role,m.champion,m.win,m.queue,{patch_expression} patch
+               SELECT m.account,m.match_id,t.occurred_at,t.invalid_dates,
+                      m.role,m.champion,m.win,m.queue,{patch_expression} patch
                FROM match_quality m
                JOIN global_match_time t ON t.match_id=m.match_id
                WHERE m.role!='INVALID'
@@ -212,6 +223,9 @@ def load_observations(db_path: Path) -> tuple[list[Observation], dict]:
                 registered += 1
                 canonical = identity_account.get(identity, saved_account)
                 identity_group = identity
+            # Never replace malformed source dates with a valid peer's time.
+            if row["invalid_dates"]:
+                raise ValueError(f"invalid timestamp for global match: {row['match_id']}")
             item = Observation(
                 account=canonical,
                 identity_group=identity_group,

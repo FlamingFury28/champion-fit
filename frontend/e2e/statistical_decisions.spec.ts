@@ -204,8 +204,13 @@ test('il companion restringe la stima a una partita e resta persistente al refre
   expect(ahri.credible_lower_90).toBeLessThan(50)
   expect(ahri.credible_upper_90).toBeGreaterThan(50)
   expect(ahri.actionable).toBe(false)
+  const lowerBound = ahri.credible_lower_90
+  const upperBound = ahri.credible_upper_90
+  if (typeof lowerBound !== 'number' || typeof upperBound !== 'number') {
+    throw new Error('Expected both credible interval bounds for the companion matrix')
+  }
   const row = page.getByRole('region', { name: 'Campioni ordinati per rendimento stimato' }).getByRole('table')
     .getByRole('row').filter({ has: page.getByRole('link', { name: /Ahri/ }) })
   await expect(row).toContainText('Positivo da verificare')
-  await expect(row).toContainText(`${decimal(ahri.credible_lower_90)}%–${decimal(ahri.credible_upper_90)}%`)
+  await expect(row).toContainText(`${decimal(lowerBound)}%–${decimal(upperBound)}%`)
 })

@@ -3,8 +3,9 @@ import { ArrowLeft } from 'lucide-react'
 import { Link, useLocation, useParams, useSearchParams } from 'react-router'
 import { recommendationsQuery } from '../api/queries'
 import type { ObservedRecommendationDto } from '../api/types'
-import { normalizeRole, pct, ROLES } from '../app/filters'
+import { pct, ROLES } from '../app/filters'
 import { preferencePeriodLabel, queueLabel, roleLabel } from '../app/labels'
+import { recommendationPeriodFilter, recommendationQueueFilter, recommendationRoleFilter } from '../app/recommendation-filters'
 import { useScope } from '../app/scope'
 import { ChampionArtwork } from '../components/ChampionArtwork'
 import { ObservedRecommendationCard } from '../components/ObservedRecommendationCard'
@@ -12,7 +13,6 @@ import { DataTable, DecisionSummary, EmptyState, ErrorState, MetricCard, PageHea
 
 export interface ChampionDetailPageProps { champion?: string; embedded?: boolean }
 const roles = ROLES.filter((role) => role !== 'ALL')
-const concreteRole = (value: string | null) => { const role = normalizeRole(value); return role === 'ALL' ? undefined : role }
 
 function candidateFromResponse(champion: string, role: string | undefined, candidate: ObservedRecommendationDto | null | undefined, known: ObservedRecommendationDto[], discover: ObservedRecommendationDto[]) {
   if (candidate) return candidate
@@ -79,9 +79,11 @@ export function ChampionDetailPage({ champion: championProp, embedded = false }:
   const [params, setParams] = useSearchParams()
   const location = useLocation()
   const roleParam = embedded ? 'detailRole' : 'role'
-  const explicitRole = concreteRole(params.get(roleParam))
+  const explicitRole = recommendationRoleFilter(params.get(roleParam))
   const { scope, scopeReady } = useScope()
-  const result = useQuery({ ...recommendationsQuery(scope, { champion, role: explicitRole, queue: params.get('queue') ?? undefined, days: params.get('days') ?? undefined }), enabled: scopeReady && Boolean(champion) })
+  const queue = recommendationQueueFilter((embedded ? params.get('detailQueue') : null) ?? params.get('queue')) ?? undefined
+  const days = recommendationPeriodFilter((embedded ? params.get('detailDays') : null) ?? params.get('days')) ?? undefined
+  const result = useQuery({ ...recommendationsQuery(scope, { champion, role: explicitRole, queue, days }), enabled: scopeReady && Boolean(champion) })
   const data = result.data
   const candidate = data && explicitRole ? candidateFromResponse(champion, explicitRole, data.candidate, data.known, data.discover) : null
   const candidates = data && !explicitRole
@@ -89,7 +91,8 @@ export function ChampionDetailPage({ champion: championProp, embedded = false }:
     : candidate ? [candidate] : []
   const primaryCandidate = candidates[0] ?? null
   const updateRole = (value: string) => setParams((current) => { const next = new URLSearchParams(current); if (value) next.set(roleParam, value); else next.delete(roleParam); return next }, { replace: true, state: location.state })
-  const header = (copy: string) => <PageHeader level={embedded ? 2 : 1} eyebrow="Campioni / Scheda" title={champion ? <>{primaryCandidate?.name || champion} · <em>{explicitRole ? roleLabel(explicitRole) : 'Tutti i ruoli'}</em></> : 'Scheda campione'} copy={copy} aside={<label className="compact-select">Ruolo della scheda<select value={explicitRole ?? ''} onChange={(event) => updateRole(event.target.value)}><option value="">Tutti i ruoli · nessun filtro</option>{roles.map((value) => <option key={value} value={value}>{roleLabel(value)}</option>)}</select></label>} />
+  const selectedRoleLabel = explicitRole === 'AUTO' ? 'Ruolo automatico' : roleLabel(explicitRole ?? 'ALL')
+  const header = (copy: string) => <PageHeader level={embedded ? 2 : 1} eyebrow="Campioni / Scheda" title={champion ? <>{primaryCandidate?.name || champion} · <em>{selectedRoleLabel}</em></> : 'Scheda campione'} copy={copy} aside={<label className="compact-select">Ruolo della scheda<select value={explicitRole ?? ''} onChange={(event) => updateRole(event.target.value)}>{explicitRole === 'AUTO' ? <option value="AUTO" disabled>Ruolo automatico</option> : null}<option value="">Tutti i ruoli · nessun filtro</option>{roles.map((value) => <option key={value} value={value}>{roleLabel(value)}</option>)}</select></label>} />
 
   if (!champion) return <EmptyState title="Campione non disponibile" description="Seleziona un campione dalla lista per aprire la scheda." />
   if (result.isPending) return <div className="page-stack">{header('Sto leggendo gusti e risultati nel contesto selezionato.')}<Skeleton lines={8} /></div>

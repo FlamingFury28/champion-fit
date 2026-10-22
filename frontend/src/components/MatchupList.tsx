@@ -2,12 +2,13 @@ import type { MatchupItemDto } from '../api/types'
 import { pct } from '../app/filters'
 import { credibleBounds, credibleMassLabel, useAlgorithmSettings } from '../app/algorithm-settings'
 import { signedPoints } from '../app/presentation'
-import { priorSourceLabel, reliabilityLabel, reliabilityTone, resolvedReliability } from '../app/reliability'
+import { evidenceThresholds, meaningfulDeltaPoints, priorSourceLabel, reliabilityLabel, reliabilityTone, resolvedReliability } from '../app/reliability'
 import { DataExplorer, type DataVisualItem } from './DataExplorer'
 import { ChampionAvatar, EmptyState, EvidenceBar, StatusBadge } from './ui'
 
 export function MatchupList({ items, direction }: { items: MatchupItemDto[]; direction: 'loses' | 'beats' }) {
-  const { credibleMass } = useAlgorithmSettings()
+  const { credibleMass, settings } = useAlgorithmSettings()
+  const thresholds = evidenceThresholds(settings)
   const filtered = items.filter((item) => direction === 'loses' ? item.losses_to > 0 : item.wins_against > 0)
   const firstActionableIndex = filtered.findIndex((item) => item.actionable)
   if (!filtered.length) {
@@ -20,8 +21,9 @@ export function MatchupList({ items, direction }: { items: MatchupItemDto[]; dir
   }
   const rows = filtered.map((item, index) => {
     const supportingSampleSize = item.effective_sample_size ?? item.games
-    const personalSampleSize = item.personal_effective_sample_size ?? supportingSampleSize
-    const reliability = resolvedReliability(item.reliability, personalSampleSize, item.actionable)
+    const personalSampleSize = item.decision_games ?? item.unique_games ?? item.personal_effective_sample_size ?? supportingSampleSize
+    const reliability = resolvedReliability(item.reliability, personalSampleSize, item.actionable, thresholds)
+    const deltaPoints = meaningfulDeltaPoints(item.meaningful_delta, thresholds)
     const lift = item.posterior_lift_pp ?? item.relative_delta_pp
     const posterior = item.posterior_win_rate
     const baseline = item.baseline_win_rate
@@ -38,8 +40,8 @@ export function MatchupList({ items, direction }: { items: MatchupItemDto[]; dir
     const evidence = <>
       <p>Percentuale di vittorie stimata {pct(posterior, 1)} · riferimento {pct(baseline, 1)} · intervallo al {intervalLabel} della percentuale di vittorie {pct(interval.lower, 1)}–{pct(interval.upper, 1)}</p>
       <p>Percentuale di vittorie osservata {pct(item.win_rate_against, 1)} · indice pesato della revisione {pct(item.weighted_win_rate_against, 1)}. I pesi di attribuzione non cambiano gli esiti usati per la stima.</p>
-      <EvidenceBar value={directionProbability ?? 0} label={`Probabilità di ${direction === 'loses' ? 'uno svantaggio' : 'un vantaggio'} di almeno 3 punti percentuali`} secondary={pct(directionProbability, 1)} />
-      <small>Partite personali distinte {personalSampleSize.toLocaleString('it-IT', { maximumFractionDigits: 1 })} · totale a supporto {supportingSampleSize.toLocaleString('it-IT', { maximumFractionDigits: 1 })} · punto di partenza {priorSourceLabel(item.prior_source ?? 'global')} ({item.prior_games ?? 0} partite). La decisione richiede almeno 20 partite personali e la soglia di probabilità corretta per i confronti.</small>
+      <EvidenceBar value={directionProbability ?? 0} label={`Probabilità di ${direction === 'loses' ? 'uno svantaggio' : 'un vantaggio'} di almeno ${deltaPoints} punti percentuali`} secondary={pct(directionProbability, 1)} />
+      <small>Partite personali distinte {personalSampleSize.toLocaleString('it-IT', { maximumFractionDigits: 1 })} · totale a supporto {supportingSampleSize.toLocaleString('it-IT', { maximumFractionDigits: 1 })} · punto di partenza {priorSourceLabel(item.prior_source ?? 'global')} ({item.prior_games ?? 0} partite). La decisione richiede almeno {thresholds.minGames} partite personali e la soglia di probabilità corretta per i confronti.</small>
     </>
     const badges = <>
       <StatusBadge tone={item.actionable ? direction === 'loses' ? 'negative' : 'positive' : 'warning'}>{badge}</StatusBadge>

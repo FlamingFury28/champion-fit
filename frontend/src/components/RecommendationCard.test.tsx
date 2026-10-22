@@ -4,7 +4,9 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ScopeSnapshot } from '../api/client'
-import type { RecommendationDto, RecommendationEvidenceResponseDto } from '../api/types'
+import type { AlgorithmSettings, RecommendationDto, RecommendationEvidenceResponseDto } from '../api/types'
+import { queryKeys } from '../api/queries'
+import { AlgorithmSettingsProvider, RECOMMENDED_ALGORITHM_SETTINGS, setSetting } from '../app/algorithm-settings'
 import { RecommendationCard } from './RecommendationCard'
 
 const scope: ScopeSnapshot = { accounts: ['Alpha#EUW'], companion: null }
@@ -35,9 +37,13 @@ function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } })
 }
 
-function setup(item = recommendation, explanationOnly = false) {
+function setup(item = recommendation, explanationOnly = false, settings?: AlgorithmSettings) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
-  const view = (currentScope = scope) => <QueryClientProvider client={client}><MemoryRouter initialEntries={['/app/fit?section=choices&role=TOP&search=Ahri']}><RecommendationCard scope={currentScope} item={item} rank={1} explanationOnly={explanationOnly} /></MemoryRouter></QueryClientProvider>
+  if (settings) client.setQueryData(queryKeys.algorithmSettings, { revision: 1, settings })
+  const view = (currentScope = scope) => {
+    const content = <MemoryRouter initialEntries={['/app/fit?section=choices&role=TOP&search=Ahri']}><RecommendationCard scope={currentScope} item={item} rank={1} explanationOnly={explanationOnly} /></MemoryRouter>
+    return <QueryClientProvider client={client}>{settings ? <AlgorithmSettingsProvider>{content}</AlgorithmSettingsProvider> : content}</QueryClientProvider>
+  }
   const result = render(view())
   return { ...result, user: userEvent.setup(), changeScope: (currentScope: ScopeSnapshot) => result.rerender(view(currentScope)) }
 }
@@ -45,6 +51,14 @@ function setup(item = recommendation, explanationOnly = false) {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('RecommendationCard', () => {
+  it.each([{ delta: .09, points: '9' }, { delta: undefined, points: '7' }])('descrive la soglia $points e il minimo decisionale configurati', async ({ delta, points }) => {
+    const settings = setSetting(setSetting(RECOMMENDED_ALGORITHM_SETTINGS, 'evidence.min_games', 40), 'evidence.meaningful_delta', .07)
+    const { user } = setup({ ...recommendation, meaningful_delta: delta }, false, settings)
+    await user.click(screen.getByRole('button', { name: 'Perché Ahri in Corsia centrale?' }))
+    expect(screen.getByText(new RegExp(`Probabilità di superare il riferimento di almeno ${points} punti percentuali`))).toBeVisible()
+    expect(screen.getByText(/Servono anche almeno 40 partite personali distinte/)).toBeVisible()
+  })
+
   it('mantiene spiegazione e audit senza duplicare la navigazione nella scheda incorporata', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json(evidenceResponse())))
     const { user } = setup(recommendation, true)
@@ -104,6 +118,26 @@ describe('RecommendationCard', () => {
     expect(await screen.findByText('EUW1-LAST')).toBeVisible()
     expect(screen.getByRole('button', { name: 'Partite successive' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Partite precedenti' })).toBeEnabled()
+  })
+
+  it.each([
+    { date: '2026-W39-4T23:30:00Z', date_utc: '2026-09-24T23:30:00.000000+00:00' },
+    { date: '2026-09-01', date_utc: null },
+    { date: '2026-09-01', date_utc: undefined },
+  ])('mostra una data canonica leggibile e conserva il fallback per date_utc=$date_utc', async (dateFields) => {
+    const response = evidenceResponse()
+    response.items = [{ ...response.items[0]!, ...dateFields }]
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json(response)))
+    const { container, user } = setup()
+    await user.click(screen.getByRole('button', { name: 'Perché Ahri in Corsia centrale?' }))
+    await user.click(screen.getByRole('button', { name: 'Mostra le partite' }))
+    await screen.findByText('EUW1-ALPHA')
+
+    const date = dateFields.date_utc ?? dateFields.date
+    const time = container.querySelector('time')
+    expect(time).toHaveAttribute('datetime', date)
+    expect(time).toHaveTextContent(new Date(date).toLocaleDateString('it-IT'))
+    expect(time).not.toHaveTextContent('2026-W39-4')
   })
 
   it('chiude e cancella la pagina visibile cambiando account o companion', async () => {

@@ -15,12 +15,12 @@ from copy import deepcopy
 import hashlib
 import json
 import math
-import threading
-from collections import OrderedDict
 
 from algorithm_settings import current_settings
 from champion_taxonomy import canonical_champion, load_catalog
 from observed_performance import observed_performance
+from runtime_metrics import measure, record_metric
+from singleflight_cache import SingleFlightLRU
 
 
 MODEL_VERSION = "hierarchical_logit_laplace_v1"
@@ -35,8 +35,9 @@ _EFFECT_SD = {
     "match": 0.55,
 }
 _CACHE_LIMIT = 8
-_CACHE: OrderedDict[str, dict] = OrderedDict()
-_CACHE_LOCK = threading.RLock()
+_CACHE = SingleFlightLRU(_CACHE_LIMIT)
+_MAX_ITERATIONS = 60
+_CONVERGENCE_TOLERANCE = 1e-6
 
 
 def _validation_summary() -> dict:
@@ -82,7 +83,11 @@ def _fit(rows: list[dict]) -> dict:
         return {"intercept": 0.0, "intercept_variance": _INTERCEPT_SD**2,
                 "effects": {key: {} for key in _EFFECT_SD},
                 "variances": {key: {} for key in _EFFECT_SD},
-                "features": [], "rows": []}
+                "features": [], "rows": [], "iterations": 0, "match_effect_levels": 0,
+                "diagnostics": {"converged": True, "iterations": 0,
+                                "final_max_change": 0.0, "gradient_max_abs": 0.0,
+                                "convergence_tolerance": _CONVERGENCE_TOLERANCE,
+                                "iteration_limit": _MAX_ITERATIONS, "empty_sample": True}}
 
     features = [_row_features(row) for row in valid]
     outcomes = [int(row["win"]) for row in valid]
@@ -103,12 +108,11 @@ def _fit(rows: list[dict]) -> dict:
     intercept_variance = _INTERCEPT_SD**2
     variances = {key: {} for key in _EFFECT_SD}
     intercept_precision = 1.0 / (_INTERCEPT_SD**2)
-    for _iteration in range(60):
+    for _iteration in range(_MAX_ITERATIONS):
         max_change = 0.0
-        gradient = math.fsum(y - _logistic(value) for y, value in zip(outcomes, eta)) - intercept * intercept_precision
-        information = math.fsum(
-            _logistic(value) * (1.0 - _logistic(value)) for value in eta
-        ) + intercept_precision
+        probabilities = [_logistic(value) for value in eta]
+        gradient = math.fsum(y - probability for y, probability in zip(outcomes, probabilities)) - intercept * intercept_precision
+        information = math.fsum(probability * (1.0 - probability) for probability in probabilities) + intercept_precision
         step = max(-1.0, min(1.0, gradient / information)) if information else 0.0
         intercept += step
         eta = [value + step for value in eta]
@@ -133,8 +137,17 @@ def _fit(rows: list[dict]) -> dict:
                         eta[index] += step
                 variances[group][category] = 1.0 / information if information else sd * sd
                 max_change = max(max_change, abs(step))
-        if max_change < 1e-6:
+        if max_change < _CONVERGENCE_TOLERANCE:
             break
+
+    residuals = [y - _logistic(value) for y, value in zip(outcomes, eta)]
+    final_gradients = [math.fsum(residuals) - intercept * intercept_precision]
+    for group, categories in indexes.items():
+        precision = 1.0 / (_EFFECT_SD[group] ** 2)
+        final_gradients.extend(
+            math.fsum(residuals[index] for index in members) - effects[group][category] * precision
+            for category, members in categories.items()
+        )
 
     # A random lobby intercept is integrated out for a future match. Retaining
     # its fitted variance in the diagnostics makes the dependency correction
@@ -148,6 +161,11 @@ def _fit(rows: list[dict]) -> dict:
         "rows": valid,
         "iterations": _iteration + 1,
         "match_effect_levels": len(effects["match"]),
+        "diagnostics": {"converged": max_change < _CONVERGENCE_TOLERANCE,
+                        "iterations": _iteration + 1, "final_max_change": max_change,
+                        "gradient_max_abs": max(abs(value) for value in final_gradients),
+                        "convergence_tolerance": _CONVERGENCE_TOLERANCE,
+                        "iteration_limit": _MAX_ITERATIONS, "empty_sample": False},
     }
 
 
@@ -177,7 +195,12 @@ def _cache_key(rows: list[dict], accounts: list[str], settings: dict) -> str:
         [str(row.get(key, "")) for key in ("account", "match_id", "champion", "role", "queue", "patch", "win")]
         for row in rows
     ]
-    payload = json.dumps([MODEL_VERSION, accounts, _jsonable(settings), material], ensure_ascii=False, separators=(",", ":"))
+    catalog = load_catalog()
+    payload = json.dumps([MODEL_VERSION, MODEL_VALIDATED, _INTERCEPT_SD, _EFFECT_SD,
+                          _MAX_ITERATIONS, _CONVERGENCE_TOLERANCE,
+                          [catalog["source_version"], catalog["version"]],
+                          accounts, _jsonable(settings), material],
+                         ensure_ascii=False, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -361,7 +384,8 @@ def _predict(rows: list[dict], accounts: list[str], fit: dict, settings: dict) -
         lift_se = math.sqrt(max(1e-8, variance + baseline_variance - 2.0 * covariance))
         positive_probability = _normal_cdf(lift / lift_se) if lift_se else float(lift > 0)
         meaningful_probability = _normal_cdf((lift - delta) / lift_se) if lift_se else float(lift > delta)
-        status = ("supported" if observed["supported"] and MODEL_VALIDATED else
+        positive_supported = bool(observed["supported"] and observed["direction"] == "better")
+        status = ("supported" if positive_supported and MODEL_VALIDATED else
                   "promising" if lift > 0 and positive_probability >= 0.5 else "other")
         _, _, account_predictions, _ = _standardized_prediction(
             fit, target_accounts, role, context_weights.get(role, []), champion,
@@ -396,7 +420,7 @@ def _predict(rows: list[dict], accounts: list[str], fit: dict, settings: dict) -
             "probability_direction_above": positive_probability * 100.0,
             "decision_threshold": (1.0 - family_alpha / (2.0 * family_size)) * 100.0,
             "family_size": family_size,
-            "historical_supported": bool(observed["supported"]),
+            "historical_supported": positive_supported,
             "historical_direction": observed["direction"],
             "positive_evidence": 0.0,
             "informative_losses_equivalent": 0.0,
@@ -404,9 +428,9 @@ def _predict(rows: list[dict], accounts: list[str], fit: dict, settings: dict) -
             "uncertainty_width_90": (high - low) * 100.0,
             "probability_above_high_fit_threshold": None,
             "classification": status,
-            "actionable": bool(observed["supported"] and MODEL_VALIDATED),
-            "reliability": "reliable" if observed["supported"] and MODEL_VALIDATED else "exploratory",
-            "validated_positive": int(observed["supported"] and MODEL_VALIDATED),
+            "actionable": bool(positive_supported and MODEL_VALIDATED),
+            "reliability": "reliable" if positive_supported and MODEL_VALIDATED else "exploratory",
+            "validated_positive": int(positive_supported and MODEL_VALIDATED),
             "blacklist_strong": 0,
             "blacklist_provisional": 0,
             "blacklist_tier": "none",
@@ -451,23 +475,21 @@ def _predict(rows: list[dict], accounts: list[str], fit: dict, settings: dict) -
 def analyze(rows: list[dict], accounts: list[str]) -> dict:
     """Fit/cache a scoped model; importing matches or changing scope invalidates the key."""
     settings = current_settings()
+    rows = deepcopy(rows)
     selected = sorted(set(str(account) for account in accounts if str(account)))
     key = _cache_key(rows, selected, settings)
-    with _CACHE_LOCK:
-        cached = _CACHE.get(key)
-        if cached is not None:
-            _CACHE.move_to_end(key)
-            return deepcopy(cached)
-    fit = _fit(rows)
-    result = _predict(rows, selected, fit, settings)
-    # Keep solver-only arrays out of the public payload; posterior cells are
-    # retained for the fixed-budget allocator and consist only of Beta shapes.
-    result.pop("fit", None)
-    with _CACHE_LOCK:
-        _CACHE[key] = deepcopy(result)
-        _CACHE.move_to_end(key)
-        while len(_CACHE) > _CACHE_LIMIT:
-            _CACHE.popitem(last=False)
+    def compute():
+        with measure("model_fit"):
+            fit = _fit(rows)
+        with measure("model_predict"):
+            result = _predict(rows, selected, fit, settings)
+        # Diagnostics contain no observation-level or account identifiers.
+        result["diagnostics"] = fit["diagnostics"]
+        result.pop("fit", None)
+        return result
+    result, hit = _CACHE.get_or_compute(key, compute)
+    if hit:
+        record_metric("model_cache_hit", 1)
     return result
 
 

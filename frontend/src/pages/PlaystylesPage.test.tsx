@@ -1,9 +1,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { playstyleQueryKeys, type PlaystylesResponse } from '../api/playstyles'
+import { playstyleQueryKeys, type PlaystyleEvidenceResponse, type PlaystylesResponse } from '../api/playstyles'
+import { DATA_VIEW_STORAGE_KEY, dataViewStore } from '../app/data-view'
 import { playstyleDaysFromSettings, playstyleFiltersFromParams, PlaystyleSuggestionsPanel, PlaystylesPage } from './PlaystylesPage'
 
 const { context } = vi.hoisted(() => ({ context: { scope: { accounts: ['Alpha#EUW'], companion: null }, scopeReady: true } }))
@@ -20,7 +21,7 @@ function fixture(): PlaystylesResponse {
   }
 }
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); context.scope.accounts = ['Alpha#EUW'] })
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); context.scope.accounts = ['Alpha#EUW']; dataViewStore.dispose(); localStorage.removeItem(DATA_VIEW_STORAGE_KEY) })
 
 function renderPage(url = '/app/playstyles', seeded = true, data = fixture()) {
   vi.stubGlobal('fetch', vi.fn(() => new Promise(() => undefined)))
@@ -32,6 +33,21 @@ function renderPage(url = '/app/playstyles', seeded = true, data = fixture()) {
 }
 
 describe('pagina stili', () => {
+  it.each(['list', 'cards', 'bars', 'scatter'] as const)('mantiene copertura e limiti della risposta nella vista %s', async (view) => {
+    const data = fixture()
+    data.categories[0]!.credible_mass = .955
+    data.categories[0]!.baseline_games = 8
+    act(() => dataViewStore.setView(view))
+    renderPage('/app/playstyles', true, data)
+    const region = screen.getByLabelText('Visualizzazioni: Archetipi dei campioni')
+    expect(region).toHaveAttribute('data-view', view)
+    for (const label of within(region).getAllByText(/intervallo binomiale al 95,5%/i)) expect(label).toBeVisible()
+    expect(region).toHaveTextContent('45–65%')
+    expect(within(region).queryByText(/intervallo binomiale al 90%/i)).not.toBeInTheDocument()
+    await userEvent.click(within(region).getByRole('button', { name: 'Perché Maghi?' }))
+    expect(within(region).getByText(/Riferimento osservato: 50% · intervallo binomiale al 95,5% 44–56%/)).toBeVisible()
+  })
+
   it('normalizza il periodo globale supportato', () => {
     expect(playstyleDaysFromSettings(365)).toBe('365')
     expect(playstyleDaysFromSettings('all')).toBe('all')
@@ -73,12 +89,55 @@ describe('pagina stili', () => {
     expect(screen.getByText('10 partite · 6V / 4S')).toBeInTheDocument()
   })
 
+  it.each([
+    { format: 'compact', timezone: 'UTC', raw: '20261017T003000+0200', canonical: '2026-10-16T22:30:00.000000+00:00', expected: '16/10/2026' },
+    { format: 'compact', timezone: 'Europe/Rome', raw: '20261017T003000+0200', canonical: '2026-10-16T22:30:00.000000+00:00', expected: '17/10/2026' },
+    { format: 'week', timezone: 'UTC', raw: '2026-W01-1T013000+0200', canonical: '2025-12-28T23:30:00.000000+00:00', expected: '28/12/2025' },
+    { format: 'week', timezone: 'Europe/Rome', raw: '2026-W01-1T013000+0200', canonical: '2025-12-28T23:30:00.000000+00:00', expected: '29/12/2025' },
+    { format: 'legacy senza date_utc', timezone: 'Europe/Rome', raw: '2026-10-16T23:30:00Z', canonical: undefined, expected: '17/10/2026' },
+    { format: 'legacy con date_utc null', timezone: 'Europe/Rome', raw: '2026-10-16T23:30:00Z', canonical: null, expected: '17/10/2026' },
+  ])('mostra una data leggibile nelle prove $format in $timezone', async ({ timezone, raw, canonical, expected }) => {
+    vi.stubEnv('TZ', timezone)
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => undefined)))
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity, gcTime: Infinity } } })
+    const filters = { days: 'all' as const, role: 'ALL', queue: '420', category: undefined }
+    const data = fixture()
+    client.setQueryData(playstyleQueryKeys.overview(context.scope, filters), { ...data, filters: { ...data.filters, days: 'all' } })
+    const proof: PlaystyleEvidenceResponse = {
+      category_id: 'mage', page: 1, page_size: 20, total: 1,
+      matches: [{ account: 'Alpha#EUW', match_id: 'PROOF-DATE', champion: 'Ahri', role: 'MIDDLE', queue: '420', date: raw, date_utc: canonical, win: 1, note: '', duration_minutes: 30 }],
+    }
+    client.setQueryData(playstyleQueryKeys.evidence(context.scope, filters, 'mage', 1, 20), proof)
+    render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/app/playstyles?days=all']}><PlaystylesPage /></MemoryRouter></QueryClientProvider>)
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Perché Maghi?' }))
+    await user.click(screen.getByRole('button', { name: 'Mostra le partite · Maghi' }))
+
+    const table = await screen.findByRole('region', { name: 'Partite a supporto di Maghi' })
+    expect(within(table).getByRole('cell', { name: expected })).toBeVisible()
+    expect(table).not.toHaveTextContent(raw)
+    expect(proof.matches[0]!.date).toBe(raw)
+  })
+
   it('preserva le scelte esplicite anche mentre il nuovo filtro non ha risposta', async () => {
     renderPage()
     await userEvent.selectOptions(screen.getByLabelText('Modalità degli stili'), '440')
     expect(screen.getByLabelText('Modalità degli stili')).toHaveValue('440')
     expect(screen.queryByRole('heading', { name: /^Maghi$/ })).not.toBeInTheDocument()
     expect(screen.getByRole('status', { name: 'Analisi degli stili per i filtri attivi' })).toBeInTheDocument()
+  })
+
+  it('seleziona tutto lo storico anche quando il periodo predefinito è di 180 giorni', async () => {
+    renderPage()
+    expect(screen.getByLabelText('Periodo degli stili')).toHaveValue('180')
+
+    await userEvent.selectOptions(screen.getByLabelText('Periodo degli stili'), '90')
+    expect(screen.getByLabelText('Periodo degli stili')).toHaveValue('90')
+
+    await userEvent.selectOptions(screen.getByLabelText('Periodo degli stili'), 'all')
+    expect(screen.getByLabelText('Periodo degli stili')).toHaveValue('all')
+    expect(fetch).toHaveBeenLastCalledWith(expect.stringContaining('days=all'), expect.anything())
+    expect(screen.queryByRole('heading', { name: /^Maghi$/ })).not.toBeInTheDocument()
   })
 
   it('ricerca e ordinamento rimangono locali senza nuove query statistiche', async () => {

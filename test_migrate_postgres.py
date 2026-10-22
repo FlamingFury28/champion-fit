@@ -22,6 +22,9 @@ class FakeCursor:
         self.batches = []
         self.statements = []
         self.execute_error_marker = execute_error_marker
+        self.groups = []
+        self.aliases = []
+        self.rows = []
 
     def __enter__(self):
         return self
@@ -30,15 +33,34 @@ class FakeCursor:
         return False
 
     def execute(self, query, params=None):
+        self.rows = []
         self.statements.append((query, params))
         if self.execute_error_marker and self.execute_error_marker in query:
             raise RuntimeError("simulated conflicting target rows")
         if params is None:
             self.schema = query
+        if query.startswith("SELECT id,name FROM friend_groups"):
+            self.rows = list(self.groups)
+        elif query.startswith("SELECT group_id,alias FROM friend_group_aliases"):
+            self.rows = list(self.aliases)
+        elif query == "SELECT current_setting('lock_timeout')":
+            self.rows = [("0",)]
         return self
 
+    def fetchall(self):
+        return self.rows
+
+    def fetchone(self):
+        return self.rows[0] if self.rows else None
+
     def executemany(self, query, rows):
-        self.batches.append((query, list(rows)))
+        rows = list(rows)
+        self.batches.append((query, rows))
+        if query == "INSERT INTO friend_groups (name) VALUES (%s)":
+            for name, in rows:
+                self.groups.append((len(self.groups) + 1, name))
+        elif query == "INSERT INTO friend_group_aliases (group_id,alias) VALUES (%s,%s)":
+            self.aliases.extend(rows)
 
 
 class FakeConnection:
@@ -120,8 +142,13 @@ class MigrationTests(unittest.TestCase):
             self.assertNotIn("AUTOINCREMENT", fake.connection.cursor_instance.schema)
             self.assertEqual(set(counts), set(TABLES))
             self.assertEqual(counts["match_quality"], 1)
-            non_empty_tables = sum(1 for table in TABLES if counts[table])
+            # The default empty feedback ledger is processed as a whole-store
+            # no-op, including its seeded singleton; other rows still transfer.
+            self.assertEqual(counts["recommendation_feedback_state"], 1)
+            non_empty_tables = sum(1 for table in TABLES if counts[table] and table != "recommendation_feedback_state")
             self.assertEqual(len(fake.connection.cursor_instance.batches), non_empty_tables)
+            self.assertFalse(any("recommendation_feedback_state" in query
+                                 for query, _ in fake.connection.cursor_instance.batches))
             self.assertTrue(all(
                 "ON CONFLICT" in query
                 for query, _ in fake.connection.cursor_instance.batches
@@ -193,8 +220,7 @@ class MigrationTests(unittest.TestCase):
             )
             self.assertEqual(
                 group_sql,
-                "INSERT INTO friend_groups (name) VALUES (%s) "
-                "ON CONFLICT (LOWER(name)) DO NOTHING",
+                "INSERT INTO friend_groups (name) VALUES (%s)",
             )
             self.assertEqual(group_rows, [("Premade",)])
             alias_sql, alias_rows = next(
@@ -202,10 +228,9 @@ class MigrationTests(unittest.TestCase):
                 if batch[0].startswith("INSERT INTO friend_group_aliases ")
             )
             self.assertIn(
-                "SELECT id,%s FROM friend_groups WHERE LOWER(name)=LOWER(%s)", alias_sql,
+                "INSERT INTO friend_group_aliases (group_id,alias) VALUES (%s,%s)", alias_sql,
             )
-            self.assertIn("ON CONFLICT (LOWER(alias))", alias_sql)
-            self.assertEqual(alias_rows, [("Duo#EUW", "Premade")])
+            self.assertEqual(alias_rows, [(1, "Duo#EUW")])
 
     def test_merge_rejects_case_insensitive_source_group_duplicates(self):
         with tempfile.TemporaryDirectory() as directory:

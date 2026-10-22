@@ -15,13 +15,17 @@ from algorithm_settings import current_settings
 
 
 VALID_ROLES = ("TOP", "JUNGLE", "MIDDLE", "BOTTOM", "SUPPORT")
+UTC_ORDER_COLUMN = "_analysis_utc_order"
+_MINIMUM_UTC = datetime.min.replace(tzinfo=timezone.utc)
+_CALENDAR_SPAN = datetime.max - datetime.min
 
 
 class AnalysisConnection:
-    def __init__(self, connection, context, evidence):
+    def __init__(self, connection, context, evidence, source_columns):
         self.base = connection
         self.context = context
         self.evidence = evidence
+        self.source_columns = tuple(source_columns)
 
     def execute(self, sql, values=()):
         # Only this read boundary is wrapped; mutation/import connections never
@@ -32,24 +36,42 @@ class AnalysisConnection:
         return getattr(self.base, name)
 
 
+def recent_match_sql(connection, alias="m"):
+    """Select archived fields and an explicit UTC value without leaking sort metadata."""
+    if isinstance(connection, AnalysisConnection):
+        columns = ",".join(f"{alias}.{column}" for column in connection.source_columns)
+        utc_date = f"{alias}.{UTC_ORDER_COLUMN}"
+        return columns, utc_date, utc_date
+    # Private raw readers retain their existing ordering. They cannot promise a
+    # normalized UTC representation without preparing an analysis projection.
+    return f"{alias}.*", "NULL", f"{alias}.date"
+
+
 def parse_time(value):
     try:
         parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
         return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
+
+
+def subtract_days_clamped(value: datetime, days: int) -> datetime:
+    """Keep exact UTC lookbacks within the earliest representable instant."""
+    interval = timedelta(days=days)
+    if interval > _CALENDAR_SPAN:
+        raise OverflowError("day interval exceeds the supported calendar")
+    return _MINIMUM_UTC if interval > value - _MINIMUM_UTC else value - interval
 
 
 def _source_filters(connection, *, targets, params, suspended, queue, cutoff, now, account_filter,
                     companion_filter, queue_aliases):
-    """Build an index-friendly superset of the exact request context.
+    """Build a SQL superset of the exact request context.
 
-    ``match_quality.date`` is TEXT in both storage engines.  The direct bounds
-    use its stored extended ISO 8601 representation and the date index.  The
-    engine-specific expression then checks the exact instant without allowing
-    arbitrary legacy text to abort a PostgreSQL query.  ``parse_time`` below is
-    retained as the final semantic guard for formats the engines parse more
-    permissively than Python.
+    ``match_quality.date`` is TEXT in both storage engines. Native date checks
+    handle ordinary extended ISO 8601 timestamps. Other stored formats must
+    reach ``parse_time`` below: Python accepts compact dates, week dates and
+    offsets that the database engines reject or interpret differently. Invalid
+    legacy text also reaches that final guard without aborting a SQL query.
     """
     scope_sql, scope_values = account_filter(targets, "m.account")
     companion_sql, companion_values = companion_filter(params, "m.match_id")
@@ -73,13 +95,13 @@ def _source_filters(connection, *, targets, params, suspended, queue, cutoff, no
 
     # UTC instants can be at most one local calendar day away from their UTC
     # date because datetime.fromisoformat rejects offsets of 24 hours or more.
-    # Padding therefore makes these index-friendly TEXT bounds a safe prefilter.
-    date_sql = ""
+    # Padding makes these TEXT bounds safe for native-compatible extended dates.
+    date_checks = []
     date_values = []
     if cutoff is not None:
-        date_sql += " AND m.date>=?"
-        date_values.append((cutoff.date() - timedelta(days=1)).isoformat())
-    date_sql += " AND m.date<?"
+        date_checks.append("m.date>=?")
+        date_values.append(subtract_days_clamped(cutoff, 1).date().isoformat())
+    date_checks.append("m.date<?")
     try:
         date_values.append((now.date() + timedelta(days=2)).isoformat())
     except OverflowError:
@@ -87,28 +109,58 @@ def _source_filters(connection, *, targets, params, suspended, queue, cutoff, no
         # above every supported four-digit extended ISO date.
         date_values.append("9999-12-32")
     if isinstance(connection, sqlite3.Connection):
-        date_sql += " AND julianday(m.date) IS NOT NULL"
+        date_glob = "[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]"
+        second_glob = date_glob + "[T ][0-9][0-9]:[0-9][0-9]:[0-9][0-9]"
+        # Restrict the fast path to common isoformat() representations. In
+        # particular, SQL rounding must never reject a timestamp whose fraction
+        # Python truncates after six digits. Other valid forms use the fallback.
+        common_globs = [date_glob, *(
+            second_glob + fraction + offset
+            for fraction in ("", ".[0-9][0-9][0-9]", ".[0-9][0-9][0-9][0-9][0-9][0-9]")
+            for offset in ("", "Z", "[+-][0-9][0-9]:[0-9][0-9]")
+        )]
+        native_date = (
+            "(" + " OR ".join(f"m.date GLOB '{pattern}'" for pattern in common_globs) + ")"
+            " AND julianday(m.date) IS NOT NULL"
+        )
         if cutoff is not None:
-            date_sql += " AND julianday(m.date)>=julianday(?)"
+            date_checks.append("julianday(m.date)>=julianday(?)")
             date_values.append(cutoff.isoformat())
-        date_sql += " AND julianday(m.date)<=julianday(?)"
+        # SQLite can round datetime.max's fraction beyond its calendar and
+        # return NULL. Keep this SQL prefilter conservative; Python below
+        # always applies the exact upper bound to every retained row.
+        date_checks.append("COALESCE(julianday(m.date)<=julianday(?),1)")
         date_values.append(now.isoformat())
     else:
         # PostgreSQL 16's input validator lets the CASE avoid raising on an
         # invalid legacy value.  Naive stored timestamps retain parse_time's UTC
         # interpretation instead of depending on the database session timezone.
+        # Restrict native parsing to unambiguous ISO syntax. For example, +02
+        # and +0200 are valid Python offsets but the naive branch below would
+        # otherwise discard their zone. Avoid '?' in this literal regex because
+        # the PostgreSQL adapter replaces SQL parameter markers textually.
+        native_date = (
+            "m.date ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}"
+            "([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}([.][0-9]{1,6}){0,1}){0,1}"
+            "(Z|[+-][0-9]{2}:[0-9]{2}){0,1}){0,1}$' "
+            "AND pg_input_is_valid(m.date,'timestamp with time zone')"
+        )
         postgres_date = (
             "(CASE WHEN pg_input_is_valid(m.date,'timestamp with time zone') THEN "
             "CASE WHEN m.date ~ '(Z|[+-][0-9]{2}:[0-9]{2})$' "
             "THEN CAST(m.date AS timestamp with time zone) "
             "ELSE CAST(m.date AS timestamp without time zone) AT TIME ZONE 'UTC' END END)"
         )
-        date_sql += f" AND {postgres_date} IS NOT NULL"
         if cutoff is not None:
-            date_sql += f" AND {postgres_date}>=CAST(? AS timestamp with time zone)"
+            date_checks.append(f"{postgres_date}>=CAST(? AS timestamp with time zone)")
             date_values.append(cutoff.isoformat())
-        date_sql += f" AND {postgres_date}<=CAST(? AS timestamp with time zone)"
+        date_checks.append(f"{postgres_date}<=CAST(? AS timestamp with time zone)")
         date_values.append(now.isoformat())
+    date_sql = (
+        f" AND (CASE WHEN {native_date} THEN "
+        + " AND ".join(date_checks)
+        + " ELSE TRUE END)"
+    )
 
     role_sql = " AND m.role IN (" + ",".join("?" for _ in VALID_ROLES) + ")"
     sql = scope_sql + companion_sql + suspended_sql + role_sql + queue_sql + date_sql
@@ -144,10 +196,10 @@ def prepare_analysis(connection, params, *, account_filter, companion_filter, al
         queue = canonical_queue(queue)
         if not queue.isdigit() or not 0 < int(queue) <= 9999:
             raise ValueError("Modalità non valida")
-    # as_of is server-generated in HTTP requests; offline validators may pass
-    # an explicit timestamp directly for reproducible historical comparisons.
+    # Explicit timestamps keep historical comparisons reproducible. Capture
+    # one reference instant for the projection and downstream readers.
     now = parse_time(params.get("as_of", [None])[0]) or datetime.now(timezone.utc)
-    cutoff = (now - timedelta(days=int(days))).replace(hour=0, minute=0, second=0, microsecond=0) if days != "all" else None
+    cutoff = subtract_days_clamped(now, int(days)).replace(hour=0, minute=0, second=0, microsecond=0) if days != "all" else None
     role = params.get("role", [""])[0].strip().upper()
     if role == "UTILITY":
         role = "SUPPORT"
@@ -199,14 +251,20 @@ def prepare_analysis(connection, params, *, account_filter, companion_filter, al
             continue
         if role != "ALL" and row["role"] != role:
             continue
+        row[UTC_ORDER_COLUMN] = when.isoformat(timespec="microseconds")
         valid.append(row)
-    params.update({"queue": [queue], "days": [days], "role": [role]})
-    # Retain every source column for compatibility with existing SELECT m.*.
+    params.update({"queue": [queue], "days": [days], "role": [role], "as_of": [now.isoformat()]})
+    # Keep original fields separate from request-only chronological metadata so
+    # API readers can enumerate the archive columns without exposing it.
     cursor = connection.execute("SELECT * FROM match_quality WHERE 1=0")
     columns = [column[0] for column in cursor.description]
+    projected_columns = [*columns, UTC_ORDER_COLUMN]
     temp_schema = "temp" if isinstance(connection, sqlite3.Connection) else "pg_temp"
     connection.execute(f"DROP TABLE IF EXISTS {temp_schema}.analysis_match_quality")
-    connection.execute("CREATE TEMP TABLE analysis_match_quality AS SELECT * FROM match_quality WHERE 1=0")
+    connection.execute(
+        f"CREATE TEMP TABLE analysis_match_quality AS "
+        f"SELECT *, CAST(NULL AS TEXT) {UTC_ORDER_COLUMN} FROM match_quality WHERE 1=0"
+    )
     effective = {}
     inserted = []
     for row in valid:
@@ -215,10 +273,10 @@ def prepare_analysis(connection, params, *, account_filter, companion_filter, al
         effective[key] = result
         row["win_evidence_weight"] = result["effective_win_weight"]
         row["loss_attribution_weight"] = result["effective_loss_weight"]
-        inserted.append(tuple(row[column] for column in columns))
+        inserted.append(tuple(row[column] for column in projected_columns))
     if inserted:
         connection.executemany(
-            "INSERT INTO analysis_match_quality (" + ",".join(columns) + ") VALUES (" + ",".join("?" for _ in columns) + ")",
+            "INSERT INTO analysis_match_quality (" + ",".join(projected_columns) + ") VALUES (" + ",".join("?" for _ in projected_columns) + ")",
             inserted,
         )
     connection.execute("CREATE INDEX analysis_match_scope ON analysis_match_quality(account,match_id)")
@@ -229,4 +287,4 @@ def prepare_analysis(connection, params, *, account_filter, companion_filter, al
         "suspended_accounts": sorted(suspended & set(targets)),
         "companion_filter_active": companion_filter_active,
     }
-    return AnalysisConnection(connection, context, effective), params
+    return AnalysisConnection(connection, context, effective, columns), params

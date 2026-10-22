@@ -1,14 +1,14 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { RotateCcw, Save, ScanSearch, SlidersHorizontal } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useBlocker } from 'react-router'
-import { ApiError, postJson, putJson, scopeQuery } from '../api/client'
+import { previewAlgorithmSettings, saveAlgorithmSettings } from '../api/algorithm-settings'
+import { ApiError, scopeQuery } from '../api/client'
 import { algorithmSettingsQuery, queryKeys } from '../api/queries'
 import type {
   AlgorithmPreviewResponseDto,
   AlgorithmSettingSchemaDto,
   AlgorithmSettings,
-  AlgorithmSettingsResponseDto,
 } from '../api/types'
 import { getSetting, setSetting, useAlgorithmSettings } from '../app/algorithm-settings'
 import { preferencePeriodLabel, queueLabel } from '../app/labels'
@@ -191,10 +191,11 @@ export function settingOptionLabel(path: string, value: string | number, fallbac
   return fallback
 }
 
-export function SettingControl({ field, value, onChange, resetKey = 0 }: {
+export function SettingControl({ field, value, onChange, onDraftChange, resetKey = 0 }: {
   field: AlgorithmSettingSchemaDto
   value: unknown
   onChange: (value: unknown) => void
+  onDraftChange?: (pending: boolean) => void
   resetKey?: number
 }) {
   const id = `algorithm-${field.path.replace(/[^a-z0-9]+/gi, '-')}`
@@ -207,7 +208,7 @@ export function SettingControl({ field, value, onChange, resetKey = 0 }: {
     </label>
   }
   if (field.type === 'period') {
-    return <PeriodSettingControl key={resetKey} id={id} descriptionId={descriptionId} field={field} value={value} onChange={onChange} />
+    return <PeriodSettingControl key={resetKey} id={id} descriptionId={descriptionId} field={field} value={value} onChange={onChange} onDraftChange={onDraftChange} />
   }
   if (field.type === 'select' || options.length) {
     return <label className="algorithm-setting" htmlFor={id}>
@@ -219,7 +220,7 @@ export function SettingControl({ field, value, onChange, resetKey = 0 }: {
     </label>
   }
   if (field.type.endsWith('[]') || Array.isArray(value)) {
-    return <ArraySettingControl key={formatValue(value)} id={id} descriptionId={descriptionId} field={field} value={value} onChange={onChange} />
+    return <ArraySettingControl key={`${resetKey}:${formatValue(value)}`} id={id} descriptionId={descriptionId} field={field} value={value} onChange={onChange} onDraftChange={onDraftChange} />
   }
   const numeric = field.type === 'number' || field.type === 'integer' || typeof value === 'number'
   return <label className="algorithm-setting" htmlFor={id}>
@@ -229,8 +230,8 @@ export function SettingControl({ field, value, onChange, resetKey = 0 }: {
       aria-label={field.label}
       aria-describedby={descriptionId}
       type={numeric ? 'number' : 'text'}
-      min={field.min}
-      max={field.max}
+      min={field.min ?? undefined}
+      max={field.max ?? undefined}
       step={field.type === 'integer' ? 1 : numeric ? 'any' : undefined}
       value={typeof value === 'string' || typeof value === 'number' ? value : ''}
       onChange={(event) => onChange(numeric && event.target.value !== '' ? Number(event.target.value) : event.target.value)}
@@ -238,12 +239,13 @@ export function SettingControl({ field, value, onChange, resetKey = 0 }: {
   </label>
 }
 
-function PeriodSettingControl({ id, descriptionId, field, value, onChange }: {
+function PeriodSettingControl({ id, descriptionId, field, value, onChange, onDraftChange }: {
   id: string
   descriptionId: string
   field: AlgorithmSettingSchemaDto
   value: unknown
   onChange: (value: unknown) => void
+  onDraftChange?: (pending: boolean) => void
 }) {
   const period = record(value)
   const currentValue = typeof period.value === 'number' && Number.isSafeInteger(period.value) ? period.value : 0
@@ -264,7 +266,8 @@ function PeriodSettingControl({ id, descriptionId, field, value, onChange }: {
   }
   const commit = () => {
     const parsed = parseDraft()
-    if (parsed == null) { updateEdit(draft, true); return }
+    if (parsed == null) { onDraftChange?.(true); updateEdit(draft, true); return }
+    onDraftChange?.(false)
     updateEdit(draft)
     onChange({ value: parsed, unit: currentUnit })
   }
@@ -277,15 +280,17 @@ function PeriodSettingControl({ id, descriptionId, field, value, onChange }: {
         aria-describedby={`${descriptionId}${invalid ? ` ${errorId}` : ''}`}
         aria-invalid={invalid}
         type="number"
-        min={field.min}
-        max={field.max}
+        min={field.min ?? undefined}
+        max={field.max ?? undefined}
         step={1}
         value={draft}
         onChange={(event) => {
           const nextDraft = event.target.value
           const parsed = Number(nextDraft)
+          const valid = nextDraft.trim() !== '' && Number.isSafeInteger(parsed) && parsed >= (field.min ?? 0) && parsed <= (field.max ?? 100000)
+          onDraftChange?.(!valid)
           updateEdit(nextDraft)
-          if (nextDraft.trim() !== '' && Number.isSafeInteger(parsed) && parsed >= (field.min ?? 0) && parsed <= (field.max ?? 100000)) {
+          if (valid) {
             onChange({ value: parsed, unit: currentUnit })
           }
         }}
@@ -298,7 +303,8 @@ function PeriodSettingControl({ id, descriptionId, field, value, onChange }: {
         value={currentUnit}
         onChange={(event) => {
           const parsed = parseDraft()
-          if (parsed == null) { updateEdit(draft, true); return }
+          if (parsed == null) { onDraftChange?.(true); updateEdit(draft, true); return }
+          onDraftChange?.(false)
           const unit = event.target.value === 'games' ? 'games' : 'days'
           updateEdit(String(parsed))
           onChange({ value: parsed, unit })
@@ -315,12 +321,13 @@ function PeriodSettingControl({ id, descriptionId, field, value, onChange }: {
   </label>
 }
 
-function ArraySettingControl({ id, descriptionId, field, value, onChange }: {
+function ArraySettingControl({ id, descriptionId, field, value, onChange, onDraftChange }: {
   id: string
   descriptionId: string
   field: AlgorithmSettingSchemaDto
   value: unknown
   onChange: (value: unknown) => void
+  onDraftChange?: (pending: boolean) => void
 }) {
   const formatted = formatValue(value)
   const [draft, setDraft] = useState(formatted)
@@ -330,14 +337,17 @@ function ArraySettingControl({ id, descriptionId, field, value, onChange }: {
     if (field.type === 'number[]') {
       const parsed = parts.map(Number)
       if (!parts.length || parsed.some((item) => !Number.isFinite(item))) {
+        onDraftChange?.(true)
         setInvalid(true)
         return
       }
       setInvalid(false)
+      onDraftChange?.(false)
       onChange(parsed)
       return
     }
     setInvalid(false)
+    onDraftChange?.(false)
     onChange(parts)
   }
   const errorId = `${id}-error`
@@ -350,7 +360,7 @@ function ArraySettingControl({ id, descriptionId, field, value, onChange }: {
       aria-invalid={invalid}
       value={draft}
       inputMode={field.type === 'number[]' ? 'decimal' : undefined}
-      onChange={(event) => { setDraft(event.target.value); setInvalid(false) }}
+      onChange={(event) => { onDraftChange?.(true); setDraft(event.target.value); setInvalid(false) }}
       onBlur={commit}
       onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur() } }}
     />
@@ -361,22 +371,48 @@ function ArraySettingControl({ id, descriptionId, field, value, onChange }: {
 export function AlgorithmSettingsPage() {
   const active = useAlgorithmSettings()
   const { scope } = useScope()
+  const scoped = scopeQuery(scope)
+  const previewScope = {
+    account: scoped.account ?? [],
+    companion_account: scoped.companion_account ?? [],
+    companion_mode: scoped.companion_mode ?? null,
+  }
+  const previewScopeKey = JSON.stringify(previewScope)
   const queryClient = useQueryClient()
   const { notify } = useToast()
   const [editorState, setEditor] = useState<EditorState | null>(null)
+  const [pendingControlDrafts, setPendingControlDrafts] = useState<Set<string>>(() => new Set())
   const [controlResetKey, setControlResetKey] = useState(0)
-  const [preview, setPreview] = useState<AlgorithmPreviewResponseDto | null>(null)
+  const [previewState, setPreview] = useState<{ scopeKey: string; result: AlgorithmPreviewResponseDto } | null>(null)
+  const preview = previewState?.scopeKey === previewScopeKey ? previewState.result : null
   const [previewError, setPreviewError] = useState<Error | null>(null)
+  const [applyError, setApplyError] = useState<Error | null>(null)
   const [previewing, setPreviewing] = useState(false)
   const [applying, setApplying] = useState(false)
   const previewController = useRef<AbortController | null>(null)
+  const currentPreviewScope = useRef(previewScopeKey)
+
+  const invalidatePreview = useCallback(() => {
+    previewController.current?.abort()
+    previewController.current = null
+    setPreviewing(false)
+    setPreview(null)
+    setPreviewError(null)
+  }, [])
+
+  useLayoutEffect(() => {
+    if (currentPreviewScope.current === previewScopeKey) return
+    currentPreviewScope.current = previewScopeKey
+    // Invalidate the old scope before painting while retaining the draft.
+    invalidatePreview()
+  }, [invalidatePreview, previewScopeKey])
 
   useEffect(() => () => previewController.current?.abort(), [])
 
   const editor = editorState ?? (active.data
     ? { baseRevision: active.data.revision, draft: cloneSettings(active.data.settings) }
     : null)
-  const dirty = Boolean(editor && active.data && !sameSettings(editor.draft, active.data.settings))
+  const dirty = pendingControlDrafts.size > 0 || Boolean(editor && active.data && !sameSettings(editor.draft, active.data.settings))
   const blocker = useBlocker(dirty)
 
   useEffect(() => {
@@ -409,47 +445,65 @@ export function AlgorithmSettingsPage() {
     })
   }, [active.data?.schema])
 
+  if (active.isPending) return <div className="page-stack"><Skeleton lines={10} label="Caricamento delle impostazioni algoritmiche" /></div>
+  if (!active.data) return <ErrorState title="Impossibile caricare le impostazioni algoritmiche" error={active.error ?? new Error('Risposta delle impostazioni non disponibile.')} onRetry={() => { void active.refetch() }} />
   if (active.isPending || !editor) return <div className="page-stack"><Skeleton lines={10} label="Caricamento delle impostazioni algoritmiche" /></div>
-  if (active.error || !active.data) return <ErrorState title="Impossibile caricare le impostazioni algoritmiche" error={active.error ?? new Error('Risposta delle impostazioni non disponibile.')} onRetry={() => { void active.refetch() }} />
 
   const previewChampionBase = record(preview?.comparisons.find((item) => item.algorithm === 'Campioni e attribuzione')?.after)
   const negativeVeto = Boolean(getSetting(active.data.settings, 'attribution.negative_veto'))
+  const refreshBlocked = active.isFetching || Boolean(active.refreshError)
+  const preserveControlDraft = (path: string, pending: boolean) => {
+    // Array and period controls can hold incomplete text before committing a value.
+    // Retain its original settings/revision even if a refresh returns newer data.
+    if (pending) {
+      invalidatePreview()
+      setEditor((current) => current ?? editor)
+    }
+    setPendingControlDrafts((current) => {
+      if (current.has(path) === pending) return current
+      const next = new Set(current)
+      if (pending) next.add(path)
+      else next.delete(path)
+      return next
+    })
+  }
   const setValue = (path: string, value: unknown) => {
+    invalidatePreview()
     setEditor({ ...editor, draft: setSetting(editor.draft, path, value) })
-    setPreview(null)
-    setPreviewError(null)
   }
   const previewSettings = async () => {
+    if (refreshBlocked || pendingControlDrafts.size) return
     previewController.current?.abort()
     const controller = new AbortController()
     previewController.current = controller
+    const isCurrentPreview = () => previewController.current === controller && !controller.signal.aborted
+      && currentPreviewScope.current === previewScopeKey
     setPreviewing(true)
     setPreviewError(null)
     try {
-      const scoped = scopeQuery(scope)
-      const result = await postJson<AlgorithmPreviewResponseDto>('/api/algorithm-settings/preview', {
+      const result = await previewAlgorithmSettings({
         expected_revision: editor.baseRevision,
         settings: editor.draft,
-        scope: {
-          account: scoped.account ?? [],
-          companion_account: scoped.companion_account ?? [],
-          companion_mode: scoped.companion_mode ?? null,
-        },
+        scope: previewScope,
         filters: {},
       }, controller.signal)
-      setPreview(result)
+      if (!isCurrentPreview()) return
+      setPreview({ scopeKey: previewScopeKey, result })
     } catch (error) {
+      if (!isCurrentPreview()) return
       if (error instanceof DOMException && error.name === 'AbortError') return
       if (error instanceof ApiError && error.status === 409) {
         try {
           const fresh = await queryClient.fetchQuery({ ...algorithmSettingsQuery, staleTime: 0 })
-          setEditor({ ...editor, baseRevision: fresh.revision })
+          if (!isCurrentPreview()) return
+          setEditor((current) => ({ ...(current ?? editor), baseRevision: fresh.revision }))
           setPreviewError(new Error('La revisione attiva è cambiata. La bozza è conservata: ricalcola l’anteprima sulla nuova base.'))
           return
         } catch {
           // Preserve the original conflict below when the refresh also fails.
         }
       }
+      if (!isCurrentPreview()) return
       setPreviewError(error instanceof Error ? error : new Error('Anteprima non disponibile.'))
     } finally {
       if (previewController.current === controller) {
@@ -459,18 +513,21 @@ export function AlgorithmSettingsPage() {
     }
   }
   const applySettings = async () => {
+    if (refreshBlocked || pendingControlDrafts.size) return
     previewController.current?.abort()
     setPreviewing(false)
     setApplying(true)
+    setApplyError(null)
     try {
       await queryClient.cancelQueries({ predicate: (query) => query.queryKey[0] === 'api' && query.queryKey[1] !== 'algorithm-settings' })
-      const saved = await putJson<AlgorithmSettingsResponseDto>('/api/algorithm-settings', {
+      const saved = await saveAlgorithmSettings({
         expected_revision: editor.baseRevision,
         settings: editor.draft,
       })
       queryClient.setQueryData(queryKeys.algorithmSettings, saved)
       setEditor({ baseRevision: saved.revision, draft: cloneSettings(saved.settings) })
       setControlResetKey((current) => current + 1)
+      setPendingControlDrafts(new Set())
       setPreview(null)
       await queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] === 'api' && query.queryKey[1] !== 'algorithm-settings' })
       notify('Impostazioni applicate', { description: `Revisione ${saved.revision}. I risultati vengono ricalcolati dal server.`, tone: 'success' })
@@ -484,6 +541,7 @@ export function AlgorithmSettingsPage() {
           notify('Conflitto di revisione', { description: 'La tua bozza è conservata, ma non è stato possibile ricaricare la revisione attiva.', tone: 'error' })
         }
       } else {
+        setApplyError(error instanceof Error ? error : new Error('Impossibile applicare le impostazioni.'))
         notify('Impossibile applicare le impostazioni', { description: error instanceof Error ? error.message : undefined, tone: 'error' })
       }
     } finally {
@@ -494,6 +552,12 @@ export function AlgorithmSettingsPage() {
   return <div className="page-stack algorithm-settings-page">
     <PageHeader eyebrow="Impostazioni / Algoritmi" title="Parametri degli algoritmi" copy="Configura il motore di raccomandazione basato su gusti e risultati e le analisi statistiche precedenti. La bozza resta locale finché non la applichi." aside={<StatusBadge tone={dirty ? 'warning' : 'positive'}>{dirty ? 'Bozza non applicata' : `Revisione ${active.data.revision}`}</StatusBadge>} />
 
+    {active.refreshError ? <ErrorState
+      title={`Aggiornamento non riuscito · Revisione ${active.data.revision} conservata`}
+      error={new Error(`La bozza è conservata. Riprova l’aggiornamento prima di calcolare l’anteprima o applicare le impostazioni. ${active.refreshError.message}`)}
+      onRetry={() => { void active.refetch() }}
+    /> : null}
+
     <section className="algorithm-settings-summary" aria-label="Stato delle impostazioni">
       <Surface><span>Revisione attiva</span><strong>{active.data.revision}</strong><small>{active.data.fingerprint}</small></Surface>
       <Surface><span>Contesto globale</span><strong>{queueLabel(String(getSetting(active.data.settings, 'context.queue')))}</strong><small>{daysLabel(getSetting(active.data.settings, 'context.days'))} · usato come default esplicito</small></Surface>
@@ -503,16 +567,18 @@ export function AlgorithmSettingsPage() {
 
     {groups.length ? groups.map(([group, fields]) => { const presentation = groupPresentation(group, fields); return <details key={group} className="surface algorithm-settings-group" open={fields.some((field) => field.path.startsWith('recommendations.'))}>
       <summary><SlidersHorizontal aria-hidden="true" /><span><strong>{presentation.name}</strong><small>{presentation.description}</small></span></summary>
-      <div className="algorithm-settings-grid">{fields.map((field) => <SettingControl key={field.path} resetKey={controlResetKey} field={field} value={getSetting(editor.draft, field.path)} onChange={(value) => setValue(field.path, value)} />)}</div>
+      <fieldset className="algorithm-settings-grid" disabled={applying} aria-label={presentation.name}>{fields.map((field) => <SettingControl key={field.path} resetKey={controlResetKey} field={field} value={getSetting(editor.draft, field.path)} onChange={(value) => setValue(field.path, value)} onDraftChange={(pending) => preserveControlDraft(field.path, pending)} />)}</fieldset>
     </details> }) : <EmptyState title="Schema dei parametri non disponibile" description="Il server non ha restituito controlli modificabili per questa revisione." />}
 
+    {pendingControlDrafts.size > 0 ? <p className="section-copy" role="status">Conferma i valori modificati con Invio o passando al campo successivo; correggi eventuali errori prima di continuare.</p> : null}
     <div className="algorithm-settings-actions">
-      <button className="button button--secondary" type="button" disabled={!dirty || applying || previewing} onClick={() => { setEditor({ baseRevision: active.data!.revision, draft: cloneSettings(active.data!.settings) }); setControlResetKey((current) => current + 1); setPreview(null) }}><RotateCcw aria-hidden="true" /> Ripristina attive</button>
-      <button className="button button--secondary" type="button" disabled={applying || previewing} onClick={() => { setEditor({ baseRevision: active.data!.revision, draft: cloneSettings(active.data!.defaults) }); setControlResetKey((current) => current + 1); setPreview(null) }}><RotateCcw aria-hidden="true" /> Ripristina consigliate</button>
-      <button className="button button--secondary" type="button" disabled={!dirty || applying || previewing} onClick={() => void previewSettings()}><ScanSearch aria-hidden="true" /> {previewing ? 'Calcolo anteprima…' : 'Calcola anteprima'}</button>
-      <button className="button" type="button" disabled={!dirty || applying || previewing} onClick={() => void applySettings()}><Save aria-hidden="true" /> {applying ? 'Applicazione…' : 'Applica impostazioni'}</button>
+      <button className="button button--secondary" type="button" disabled={!dirty || applying || previewing} onClick={() => { setEditor({ baseRevision: active.data!.revision, draft: cloneSettings(active.data!.settings) }); setControlResetKey((current) => current + 1); setPendingControlDrafts(new Set()); setPreview(null) }}><RotateCcw aria-hidden="true" /> Ripristina attive</button>
+      <button className="button button--secondary" type="button" disabled={applying || previewing} onClick={() => { setEditor({ baseRevision: active.data!.revision, draft: cloneSettings(active.data!.defaults) }); setControlResetKey((current) => current + 1); setPendingControlDrafts(new Set()); setPreview(null) }}><RotateCcw aria-hidden="true" /> Ripristina consigliate</button>
+      <button className="button button--secondary" type="button" disabled={!dirty || applying || previewing || refreshBlocked || pendingControlDrafts.size > 0} onClick={() => void previewSettings()}><ScanSearch aria-hidden="true" /> {previewing ? 'Calcolo anteprima…' : 'Calcola anteprima'}</button>
+      <button className="button" type="button" disabled={!dirty || applying || previewing || refreshBlocked || pendingControlDrafts.size > 0} onClick={() => void applySettings()}><Save aria-hidden="true" /> {applying ? 'Applicazione…' : 'Applica impostazioni'}</button>
     </div>
 
+    {applyError ? <ErrorState title="Impossibile applicare le impostazioni" error={applyError} /> : null}
     {previewError ? <ErrorState title="Impossibile calcolare l’anteprima" error={previewError} onRetry={() => void previewSettings()} /> : null}
     {preview ? <Surface className="algorithm-preview">
       <header><div><p className="eyebrow">Anteprima isolata</p><h2>{preview.changed_paths.length} parametri con impatto</h2></div><StatusBadge tone="info">Base revisione {preview.base_revision}</StatusBadge></header>
@@ -547,6 +613,8 @@ export function AlgorithmSettingsPage() {
         if (!restorable) return
         const historicalDraft = historicalSettingsDraft(item.settings!, active.data!.defaults)
         setEditor({ baseRevision: active.data!.revision, draft: historicalDraft })
+        setPendingControlDrafts(new Set())
+        setControlResetKey((current) => current + 1)
         setPreview(null)
         setPreviewError(null)
       }}>{item.revision === 1 ? 'Solo lettura' : 'Carica in bozza'}</button></article>
