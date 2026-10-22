@@ -55,9 +55,19 @@ jobs:
         run: python scripts/verify_project.py --scope backend
 
   frontend-sqlite:
-    name: Frontend / SQLite / container
+    name: Frontend / SQLite / container / ${{ matrix.browser }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - browser: chromium
+            project: chromium
+          - browser: firefox
+            project: firefox-smoke
+          - browser: webkit
+            project: webkit-smoke
 
     steps:
       - name: Check out repository
@@ -93,11 +103,11 @@ jobs:
 
       - name: Install Playwright browsers
         working-directory: frontend
-        run: npx playwright install --with-deps chromium firefox webkit
+        run: npx playwright install --with-deps ${{ matrix.browser }}
 
       - name: Run Playwright tests
         working-directory: frontend
-        run: npx playwright test
+        run: npx playwright test --project=${{ matrix.project }}
 
       - name: Build production container
         run: docker build --tag champion-fit:ci .
@@ -126,7 +136,7 @@ jobs:
         if: ${{ failure() }}
         uses: actions/upload-artifact@v4
         with:
-          name: sqlite-browser-artifacts
+          name: sqlite-browser-artifacts-${{ matrix.browser }}
           path: |
             frontend/playwright-report/
             frontend/test-results/
@@ -134,9 +144,19 @@ jobs:
           retention-days: 14
 
   postgres-browser:
-    name: Browser / PostgreSQL
+    name: Browser / PostgreSQL / ${{ matrix.browser }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - browser: chromium
+            project: chromium
+          - browser: firefox
+            project: firefox-smoke
+          - browser: webkit
+            project: webkit-smoke
     services:
       postgres:
         image: postgres:16-alpine
@@ -183,7 +203,7 @@ jobs:
 
       - name: Install Playwright browsers
         working-directory: frontend
-        run: npx playwright install --with-deps chromium firefox webkit
+        run: npx playwright install --with-deps ${{ matrix.browser }}
 
       - name: Smoke-test browser flows on PostgreSQL
         working-directory: frontend
@@ -213,12 +233,13 @@ jobs:
           e2e/remembered-budget.spec.ts
           e2e/training-progress.spec.ts
           --grep '@smoke'
+          --project=${{ matrix.project }}
 
       - name: Upload PostgreSQL browser artifacts on failure
         if: ${{ failure() }}
         uses: actions/upload-artifact@v4
         with:
-          name: postgres-browser-artifacts
+          name: postgres-browser-artifacts-${{ matrix.browser }}
           path: |
             frontend/playwright-report/
             frontend/test-results/

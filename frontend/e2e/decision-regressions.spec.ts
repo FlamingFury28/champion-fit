@@ -253,14 +253,18 @@ test('budget numerico: conserva gli esponenti su blur e Enter @smoke', async ({ 
           expect(actual.body.context.accounts).toEqual(['Alpha#EUW', 'Beta#EUW'])
           expect({ role: request.searchParams.get('role'), queue: request.searchParams.get('queue'), days: request.searchParams.get('days') }).toEqual({ role: 'MIDDLE', queue: '440', days: '90' })
           expect({ role: actual.body.context.role, queue: actual.body.context.queue, days: String(actual.body.context.days) }).toEqual({ role: 'MIDDLE', queue: '440', days: '90' })
-          expect(await page.evaluate(() => Object.fromEntries(Object.entries(localStorage)))).toEqual(storage)
+          const committedStorage = { ...storage,
+            'champion-fit:plan-budget:v1': actualBudget,
+            'champion-fit:competitive-plan-filters:v1': JSON.stringify({ budget: actualBudget, role: 'MIDDLE', queue: '440', days: '90' }),
+          }
+          expect(await page.evaluate(() => Object.fromEntries(Object.entries(localStorage)))).toEqual(committedStorage)
           await page.reload()
           await expect.poll(() => replies.length).toBe(beforeGoto + 4)
           await expect(input).toHaveValue(actualBudget)
           const persisted = { url: new URL(page.url()).searchParams.get('budget'), input: await input.inputValue(), response: replies.at(-1)!.body.budget_total }
           expect.soft(persisted, `${draft} via ${commit} must persist after full reload`).toEqual({ url: String(numericValue), input: String(numericValue), response: numericValue })
           expect([...new URL(page.url()).searchParams].filter(([key]) => key !== 'budget')).toEqual(parent)
-          expect(await page.evaluate(() => Object.fromEntries(Object.entries(localStorage)))).toEqual(storage)
+          expect(await page.evaluate(() => Object.fromEntries(Object.entries(localStorage)))).toEqual(committedStorage)
           await expect(page.getByRole('alert')).toHaveCount(0)
           cases.push({ draft, commit, numeric_value: numericValue, native, association, persisted, parent_parameters_sha256: hash(parent),
             parent_parameters_preserved: true, scope_storage_preserved: true, no_GET_during_draft: true,

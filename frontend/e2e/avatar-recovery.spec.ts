@@ -21,7 +21,7 @@ test('una nuova icona sostituisce il fallback dopo il ricaricamento dei dati @sm
   await page.route('**/api/recommendation-feedback', async (route) => {
     if (route.request().method() !== 'POST') return route.fallback()
     updated = true
-    await route.fulfill({ json: { ok: true } })
+    await route.fulfill({ json: { ok: true, revision: 8, items: [] } })
   })
   await page.goto('/app/fit?section=choices')
   await page.reload()

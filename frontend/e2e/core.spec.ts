@@ -16,26 +16,29 @@ test('@smoke overview risponde ed è navigabile da tastiera', async ({ page, bro
 
 test('il riepilogo presenta le analisi competitive e gli accessi ai dati', async ({ page }) => {
   await page.goto('/app/overview')
-  const analyses = page.getByRole('region', { name: 'Analisi competitive' })
+  const analyses = page.locator('.overview-workspace')
   const analysisDestinations = [
-    ['Apri Quali giochi meglio?', '/app/fit?section=best'],
-    ['Apri Piano da 400 partite', '/app/fit?section=tournament'],
+    ['Confronta i campioni', 'best'],
+    ['Apri il piano', 'tournament'],
   ] as const
   for (const [name, route] of analysisDestinations) {
-    await expect(analyses.getByRole('link', { name, exact: true })).toHaveAttribute('href', route)
+    const link = analyses.getByRole('link', { name, exact: true })
+    await expect(link).toBeVisible()
+    const target = new URL((await link.getAttribute('href'))!, page.url())
+    expect(target.pathname).toBe('/app/fit')
+    expect(target.searchParams.get('section')).toBe(route)
   }
-  await expect(analyses.getByRole('link')).toHaveCount(2)
-
-  const dataAccess = page.getByRole('region', { name: 'Controlla i dati delle analisi' })
+  const dataAccess = page
   const dataDestinations = [
-    ['scegliere i dati usati', '/app/profile'],
-    ['consultare lo storico delle partite', '/app/matches'],
+    ['Dati usati', '/app/profile'],
+    ['Riparti dalle tue partite Consulta gli esiti e le annotazioni nello storico.', '/app/matches'],
     ['Compagni', '/app/team/friends'],
   ] as const
   for (const [name, route] of dataDestinations) {
     await expect(dataAccess.getByRole('link', { name, exact: true })).toHaveAttribute('href', route)
   }
-  await expect(dataAccess.getByRole('link')).toHaveCount(3)
+  await expect(page.getByRole('region', { name: 'Rendimento storico dei campioni' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Un piano per fare chiarezza.' })).toBeVisible()
 })
 
 test('errore preferenze resta isolato dalla navigazione principale', async ({ page }) => {
@@ -74,7 +77,7 @@ test('errore account blocca ogni query scoped e il retry riparte con account esp
   accountsFail = false
   await page.locator('#main-content').getByRole('button', { name: 'Riprova' }).click()
   await expect(page.getByRole('heading', { level: 1, name: 'Riepilogo' })).toBeVisible()
-  await page.getByRole('link', { name: 'Apri Quali giochi meglio?', exact: true }).click()
+  await page.getByRole('link', { name: 'Confronta i campioni', exact: true }).click()
   await expect(page).toHaveURL(/\/app\/fit\?section=best/)
   await expect.poll(() => scopedRequests.length).toBeGreaterThan(0)
   expect(scopedRequests.every((url) => new URL(url).searchParams.getAll('account').length > 0)).toBe(true)
@@ -365,7 +368,7 @@ test('la prima risposta resta nel primo viewport desktop e mobile', async ({ pag
     await page.setViewportSize(viewport)
     await page.goto('/app/overview')
     await page.reload()
-    const answer = page.getByRole('heading', { name: 'Quali giochi meglio?' })
+    const answer = page.getByRole('heading', { name: 'Un primo punto di partenza.' })
     await expect(answer).toBeVisible()
     const box = await answer.boundingBox()
     expect(box).not.toBeNull()
@@ -399,9 +402,9 @@ test('testo operativo e controlli principali restano leggibili al tocco', async 
   }
 
   await page.goto('/app/overview')
-  await expectTouchTarget(page.getByRole('link', { name: /^(Apri Dati usati|Dati)$/ }))
-  await expectTouchTarget(page.getByRole('link', { name: 'Apri Quali giochi meglio?', exact: true }))
-  expect(await page.locator('.section-copy').first().evaluate((node) => Number.parseFloat(getComputedStyle(node).fontSize))).toBeGreaterThanOrEqual(12)
+  await expectTouchTarget(page.getByRole('link', { name: 'Dati usati', exact: true }))
+  await expectTouchTarget(page.getByRole('link', { name: 'Confronta i campioni', exact: true }))
+  expect(await page.locator('.overview-intro').first().evaluate((node) => Number.parseFloat(getComputedStyle(node).fontSize))).toBeGreaterThanOrEqual(12)
 
   await page.goto('/app/fit?section=training&training=plan')
   await expectTouchTarget(page.getByRole('combobox', { name: 'Ruolo', exact: true }))
@@ -446,7 +449,7 @@ test('selezione account e scheda campione restano usabili da tastiera', async ({
 test('il cambio route riporta in alto e sposta il focus sul contenuto', async ({ page }) => {
   await page.goto('/app/overview')
   await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
-  await page.getByRole('link', { name: 'Apri Quali giochi meglio?', exact: true }).click()
+  await page.getByRole('link', { name: 'Confronta i campioni', exact: true }).click()
   await expect(page).toHaveURL(/\/app\/fit\?section=best/)
   await expect(page.locator('#main-content')).toBeFocused()
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0)

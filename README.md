@@ -299,7 +299,7 @@ npx playwright test e2e/navigation.spec.ts e2e/profile-companion.spec.ts e2e/pre
 Pop-Location
 ```
 
-La CI esegue tre job indipendenti, ciascuno con un limite di 30 minuti: test Python su PostgreSQL 16; controlli frontend, suite browser completa su SQLite e verifica del container; flussi browser essenziali su PostgreSQL 16, incluso l'avanzamento del piano. I due job PostgreSQL usano servizi e schemi di test separati. I normali test browser continuano a usare SQLite quando `CHAMPION_FIT_E2E_POSTGRES_DSN` non è impostata.
+La CI esegue tre gruppi di controlli, con un limite di 30 minuti per job: test Python su PostgreSQL 16; controlli frontend, suite browser completa su SQLite e verifica del container; flussi browser essenziali su PostgreSQL 16, incluso l'avanzamento del piano. I controlli browser sono divisi in job indipendenti per Chromium, Firefox e WebKit, senza condividere fixture mutabili. Ogni job PostgreSQL usa un servizio e schemi di test separati. I normali test browser continuano a usare SQLite quando `CHAMPION_FIT_E2E_POSTGRES_DSN` non è impostata.
 
 Il workflow parte per le pull request, per i push su `main` e su avvio manuale da GitHub Actions. I push dei branch con una pull request aperta non generano una seconda esecuzione; un nuovo aggiornamento della stessa pull request interrompe il collaudo della revisione precedente. In caso di errore, gli artefatti browser SQLite e PostgreSQL vengono salvati separatamente per 14 giorni.
 
