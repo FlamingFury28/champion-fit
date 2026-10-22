@@ -541,12 +541,16 @@ def rows_to_dicts(cursor: sqlite3.Cursor) -> list[dict]:
 
 
 def _finite_duration_average(connection, average, where_sql, values):
-    """Recover nonnegative duration means when the SQL sum overflows."""
-    if average is None or math.isfinite(average):
+    """Recover overflow represented as infinity, NULL, or a coalesced zero."""
+    if average is not None and math.isfinite(average) and average != 0:
         return average
     scale = connection.execute(
         f"SELECT MAX(m.duration_minutes) value FROM match_quality m WHERE {where_sql}", values,
     ).fetchone()["value"]
+    # SQLite versions differ in their overflow result. A NULL average may
+    # also mean an empty population; a real zero mean has a zero maximum.
+    if scale is None or scale == 0:
+        return average
     normalized = connection.execute(
         f"SELECT AVG(m.duration_minutes / ?) value FROM match_quality m WHERE {where_sql}",
         [scale, *values],
