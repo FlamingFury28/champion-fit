@@ -1,6 +1,6 @@
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router'
-import { legacyDestination, withParams } from '../app/navigation'
-import { SectionNavigation } from '../components/SectionNavigation'
+import { legacyDestination, withParams, withoutChampionDetail } from '../app/navigation'
+import { ChampionSectionNavigation } from '../components/ChampionSectionNavigation'
 import { Drawer, PageHeader } from '../components/ui'
 import { ChampionDetailPage } from './ChampionDetailPage'
 import { ChampionPerformancePage } from './ChampionPerformancePage'
@@ -11,11 +11,7 @@ import { ScoutPage } from './ScoutPage'
 import { SynergyPage } from './SynergyPage'
 import { TestPlanPage } from './TestPlanPage'
 
-const sections = [
-  { id: 'best', label: 'Quali giochi meglio?' },
-  { id: 'tournament', label: 'Piano da 400 partite' },
-] as const
-const supportedSections = [...sections.map((item) => item.id), 'matchups', 'choices', 'training']
+const supportedSections = ['best', 'tournament', 'matchups', 'choices', 'training']
 
 export function ChampionsHubPage() {
   const [params, setParams] = useSearchParams()
@@ -32,33 +28,11 @@ export function ChampionsHubPage() {
   }
   const allies = params.get('relation') === 'allies'
   const plan = params.get('training') === 'plan'
-  const secondarySection = section === 'matchups' || section === 'choices' || section === 'training'
-  const secondaryHref = (nextSection: string, trainingMode?: string) => {
-    const next = new URLSearchParams(params)
-    next.set('section', nextSection)
-    next.delete('detail')
-    next.delete('detailRole')
-    if (trainingMode) next.set('training', trainingMode)
-    else next.delete('training')
-    return withParams('/app/fit', next)
-  }
   if (redirect) return <Navigate to={redirect} replace />
 
   return <div className="page-stack workspace-hub">
     <PageHeader eyebrow="Il tuo spazio / Campioni" title="Campioni" copy="Confronta il rendimento storico e distribuisci le partite del piano competitivo." />
-    <SectionNavigation path="/app/fit" active={section} label="Sezioni campioni" items={sections} />
-    <details className="hub-secondary" open={secondarySection}>
-      <summary>Altri strumenti <span>Confronti, preferenze e prove</span></summary>
-      <nav className="hub-secondary__links" aria-label="Confronti aggiuntivi">
-        <Link to={secondaryHref('matchups')} aria-current={section === 'matchups' ? 'page' : undefined}>Avversari e alleati</Link>
-      </nav>
-      <p className="hub-secondary__label">Preferenze e scoperte · Facoltative</p>
-      <nav className="hub-secondary__links" aria-label="Preferenze e scoperte facoltative">
-        <Link to={secondaryHref('choices')} aria-current={section === 'choices' ? 'page' : undefined}>Familiari e preferiti</Link>
-        <Link to={secondaryHref('training', 'discover')} aria-current={section === 'training' && !plan ? 'page' : undefined}>Scopri candidati</Link>
-        <Link to={secondaryHref('training', 'plan')} aria-current={section === 'training' && plan ? 'page' : undefined}>Piano di prove</Link>
-      </nav>
-    </details>
+    <ChampionSectionNavigation section={section} />
     {section === 'choices' ? <div className="champion-choices"><FitPage /></div>
       : section === 'best' ? <ChampionPerformancePage embedded />
       : section === 'tournament' ? <CompetitivePlanPage embedded />
@@ -72,7 +46,7 @@ export function ChampionsHubPage() {
     <Drawer wide open={Boolean(champion)} title={champion ? `Scheda di ${champion}` : 'Scheda campione'} description="Risultati, consiglio e confronti. Chiudi la scheda per tornare alla lista con gli stessi filtri." onOpenChange={(open) => {
       if (!open) {
         if (location.state?.championSheetFromList) navigate(-1)
-        else setParams((current) => { const next = new URLSearchParams(current); next.delete('detail'); next.delete('detailRole'); return next }, { replace: true })
+        else setParams(withoutChampionDetail, { replace: true })
       }
     }}>
       {champion ? <ChampionDetailPage champion={champion} embedded /> : null}

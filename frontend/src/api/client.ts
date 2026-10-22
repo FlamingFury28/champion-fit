@@ -71,14 +71,19 @@ export function buildUrl(path: string, query?: QueryInput | ScopeQueryInput): st
   return suffix ? `${path}?${suffix}` : path
 }
 
-async function errorMessage(response: Response): Promise<string> {
+function isCancellation(error: unknown, signal?: AbortSignal | null) {
+  return signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')
+}
+
+async function errorMessage(response: Response, signal?: AbortSignal | null): Promise<string> {
   const contentType = response.headers.get('content-type') ?? ''
   if (contentType.includes('application/json')) {
     try {
       const body = await response.json() as { error?: string; message?: string }
       if (body.error) return apiErrorLabel(body.error)
       if (body.message) return apiErrorLabel(body.message)
-    } catch {
+    } catch (error) {
+      if (isCancellation(error, signal)) throw error
       // Fall through to a stable status message.
     }
   }
@@ -91,7 +96,8 @@ async function errorMessage(response: Response): Promise<string> {
       .replace(/\s+/g, ' ')
       .trim()
     if (readable) return apiErrorLabel(readable.slice(0, 240))
-  } catch {
+  } catch (error) {
+    if (isCancellation(error, signal)) throw error
     // Keep the stable status fallback below.
   }
   return response.statusText ? apiErrorLabel(response.statusText) : `Il server ha restituito un errore (${response.status}).`
@@ -112,11 +118,24 @@ export async function requestJson<T>(
       },
     })
   } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') throw error
+    if (isCancellation(error, options.signal)) throw error
     throw new ApiError(0, 'Impossibile raggiungere il server Champion Fit.')
   }
-  if (!response.ok) throw new ApiError(response.status, await errorMessage(response))
-  return response.json() as Promise<T>
+  if (!response.ok) throw new ApiError(response.status, await errorMessage(response, options.signal))
+  const invalidResponseMessage = 'La risposta del server non è valida o completa. L’esito della richiesta non è confermato.'
+  let payload: unknown
+  try {
+    payload = await response.json()
+  } catch (error) {
+    if (isCancellation(error, options.signal)) throw error
+    throw new ApiError(response.status, invalidResponseMessage)
+  }
+  // Every first-party API envelope is an object. A null/scalar payload must
+  // never replace a validated cached snapshot or acknowledge a mutation.
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new ApiError(response.status, invalidResponseMessage)
+  }
+  return payload as T
 }
 
 export function getJson<T>(path: string, query?: QueryInput | ScopeQueryInput, signal?: AbortSignal) {

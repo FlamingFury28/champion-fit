@@ -1,0 +1,12 @@
+.training-progress { padding: 16px 20px; display: grid; gap: 10px; min-width: 0; }
+.training-progress__heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.training-progress__heading > button { margin-left: auto; }
+.training-progress__copy { margin: 0; font-size: 12px; color: var(--text-soft); overflow-wrap: anywhere; }
+.training-progress progress { width: 100%; height: 7px; accent-color: var(--accent); }
+.training-progress__next { display: grid; gap: 4px; border-left: 2px solid var(--accent); padding: 4px 0 4px 10px; overflow-wrap: anywhere; }
+.training-progress__next h3 { margin: 0; font-size: 16px; line-height: 1.4; }
+.training-progress summary { cursor: pointer; font-size: 13px; padding: 5px 0; }
+.training-progress ul { list-style: none; padding: 0; margin: 8px 0; display: grid; gap: 8px; }
+.training-progress li { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 13px; }
+.training-progress li small { flex-basis: 100%; overflow-wrap: anywhere; }
+@media (max-width: 500px) { .training-progress { padding: 14px; } .training-progress__heading > button { margin-left: 0; } }

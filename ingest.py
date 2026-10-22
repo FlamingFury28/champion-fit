@@ -20,9 +20,12 @@ from match_scoring import loss_attribution_weight
 from storage import SQLiteStorage
 from queue_rules import is_supported_queue
 from account_identity import canonical_account_name
+from analysis_runtime import parse_time
 
 
 def as_bool(value: object) -> int:
+    if isinstance(value, (int, float)):
+        return int(value == 1)
     return int(str(value).strip().lower() in {"1", "true", "yes", "win", "won"})
 
 
@@ -84,6 +87,22 @@ _BOOLEAN_FIELDS = ("win", "explicit_afk", "suspected_quasi_afk", "early_surrende
 _WEIGHT_FIELDS = ("match_quality_score", "loss_attribution_weight", "win_evidence_weight")
 
 
+def _valid_import_text(value: str) -> bool:
+    """Reject NUL and text that cannot be encoded as UTF-8."""
+    if "\x00" in value:
+        return False
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
+def _validate_import_source(source: str) -> None:
+    if not _valid_import_text(source):
+        raise ValueError("La sorgente dell'importazione contiene un carattere non valido")
+
+
 def valid_normalized_match(row: object) -> bool:
     """Reject incomplete or malformed hand-offs before touching their ledger.
 
@@ -94,8 +113,10 @@ def valid_normalized_match(row: object) -> bool:
     if not isinstance(row, dict) or any(field not in row for field in REQUIRED_MATCH_FIELDS):
         return False
     for field in ("account", "match_id", "date", "patch", "queue", "champion", "role"):
-        if not isinstance(row[field], str) or not row[field].strip():
+        if not isinstance(row[field], str) or not row[field].strip() or not _valid_import_text(row[field]):
             return False
+    if parse_time(row["date"].strip()) is None:
+        return False
     if normalize_role(row["role"]) not in {"TOP", "JUNGLE", "MIDDLE", "BOTTOM", "SUPPORT"}:
         return False
     duration = row["duration_minutes"]
@@ -103,7 +124,7 @@ def valid_normalized_match(row: object) -> bool:
         return False
     try:
         duration = float(duration)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return False
     if not math.isfinite(duration) or duration < 0:
         return False
@@ -116,7 +137,7 @@ def valid_normalized_match(row: object) -> bool:
         value = row[field]
         if isinstance(value, bool):
             continue
-        if isinstance(value, (int, float)) and math.isfinite(float(value)) and float(value) in {0.0, 1.0}:
+        if isinstance(value, (int, float)) and value in {0.0, 1.0}:
             continue
         if not isinstance(value, str) or value.strip().lower() not in accepted_booleans:
             return False
@@ -128,12 +149,14 @@ def valid_normalized_match(row: object) -> bool:
             return False
         try:
             value = float(value)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return False
         if not math.isfinite(value) or not 0 <= value <= 1:
             return False
     for field in ("anomaly_flags", "reason", "identity_resolution"):
-        if field in row and row[field] is not None and not isinstance(row[field], str):
+        if field in row and row[field] is not None and (
+            not isinstance(row[field], str) or not _valid_import_text(row[field])
+        ):
             return False
     return True
 
@@ -235,6 +258,7 @@ def ingest_rows(connection, matches, source: str, *, derived: bool = False) -> d
     Manual annotations live in their own table and are deliberately untouched.
     This helper never initializes a database or commits the caller's work.
     """
+    _validate_import_source(source)
     inserted = updated = skipped = 0
     backfill_import_provenance(connection)
     account_names = {}
@@ -293,13 +317,14 @@ def ingest(input_path: Path, db_path: Path = DB_PATH) -> dict[str, int | str]:
     matches = payload.get("matches", payload) if isinstance(payload, dict) else payload
     if not isinstance(matches, list):
         raise ValueError("Input must contain a 'matches' list or be a list")
+    source = str(payload.get("source", "normalized_snapshot")) if isinstance(payload, dict) else "normalized_snapshot"
+    _validate_import_source(source)
     storage = SQLiteStorage(db_path, SCHEMA_PATH)
     storage.initialize()
     connection = storage.connect()
     try:
         # This legacy migration commits; keep it outside the import transaction.
         migrate_legacy_roles(connection)
-        source = str(payload.get("source", "normalized_snapshot")) if isinstance(payload, dict) else "normalized_snapshot"
         result = ingest_rows(connection, matches, source)
         connection.commit()
         return result

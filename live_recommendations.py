@@ -17,6 +17,12 @@ import random
 from algorithm_settings import current_settings
 from champion_taxonomy import canonical_champion, champion_categories, load_catalog
 from decision_models import rank_recommendations
+from runtime_metrics import measure, record_metric
+from singleflight_cache import SingleFlightLRU
+
+
+_PLAN_VERSION = "greedy_common_random_numbers_v2"
+_PLAN_CACHE = SingleFlightLRU(8)
 
 
 def _icon_url(champion: str) -> str:
@@ -199,7 +205,7 @@ def _regret_scenarios(means, latent, accounts):
     for account in accounts:
         account_result = []
         for scenario, scenario_means in enumerate(means[account]):
-            chosen = max(range(len(scenario_means)), key=lambda index: (scenario_means[index], -index))
+            chosen = _best_arm(scenario_means)
             theta = latent[account][scenario]
             account_result.append(max(theta) - theta[chosen])
         result[account] = account_result
@@ -211,8 +217,46 @@ def _mean_regret(regrets, accounts):
     return math.fsum(value for account in accounts for value in regrets[account]) / max(count, 1)
 
 
+def _best_arm(means):
+    """One deterministic tie rule for optimization and independent evaluation."""
+    return max(range(len(means)), key=means.__getitem__)
+
+
 def competitive_training_plan(candidates, accounts, budget=None, *, optimization_scenarios=64,
-                              evaluation_scenarios=512) -> dict:
+                              evaluation_scenarios=512, seed=None) -> dict:
+    """Share complete plans by all inputs; return isolated mutable snapshots."""
+    for name, value in (("optimization_scenarios", optimization_scenarios),
+                        ("evaluation_scenarios", evaluation_scenarios)):
+        if type(value) is not int or value < 1:
+            raise ValueError(f"{name} must be a positive integer")
+    if seed is not None and type(seed) is not int:
+        raise ValueError("seed must be an integer or None")
+    budget_total = _competitive_budget(budget)
+    target_accounts = sorted(set(str(account) for account in accounts if str(account)))
+    family = sorted((deepcopy(item) for item in candidates),
+                    key=lambda item: (str(item.get("champion", "")), str(item.get("role", ""))))
+    from hierarchical_champion_model import _jsonable
+    catalog = load_catalog()
+    material = [_PLAN_VERSION, catalog["source_version"], catalog["version"],
+                _jsonable(current_settings()), family, target_accounts,
+                budget_total, optimization_scenarios, evaluation_scenarios, seed]
+    key = hashlib.sha256(json.dumps(material, ensure_ascii=False, sort_keys=True,
+                                   separators=(",", ":"), allow_nan=False).encode("utf-8")).hexdigest()
+    def compute():
+        with measure("plan_optimization"):
+            return _compute_competitive_training_plan(
+                family, target_accounts, budget_total,
+                optimization_scenarios=optimization_scenarios,
+                evaluation_scenarios=evaluation_scenarios, seed=seed,
+            )
+    result, hit = _PLAN_CACHE.get_or_compute(key, compute)
+    if hit:
+        record_metric("plan_cache_hit", 1)
+    return result
+
+
+def _compute_competitive_training_plan(candidates, accounts, budget=None, *, optimization_scenarios=64,
+                                       evaluation_scenarios=512, seed=None) -> dict:
     """Greedy fixed-budget allocation against simulated final simple regret.
 
     The optimization is a deterministic Monte Carlo heuristic, not a global
@@ -227,7 +271,7 @@ def competitive_training_plan(candidates, accounts, budget=None, *, optimization
         return {
             "budget_total": budget_total, "budget_assigned": 0,
             "budget_default": 400, "budget_unassigned": budget_total,
-            "objective": "expected_final_simple_regret", "optimizer": "greedy_common_random_numbers_v1",
+            "objective": "expected_final_simple_regret", "optimizer": _PLAN_VERSION,
             "simulation_scenarios": evaluation_scenarios, "monte_carlo_se": None,
             "expected_regret_now": None, "expected_regret_after": None, "expected_regret_reduction": None,
             "items": [],
@@ -252,7 +296,8 @@ def competitive_training_plan(candidates, accounts, budget=None, *, optimization
          [(item.get("champion"), item.get("role"), item.get("account_shapes")) for item in family]],
         ensure_ascii=False, sort_keys=True, separators=(",", ":"),
     )
-    seed = int.from_bytes(hashlib.sha256(seed_value.encode("utf-8")).digest()[:8], "big")
+    if seed is None:
+        seed = int.from_bytes(hashlib.sha256(seed_value.encode("utf-8")).digest()[:8], "big")
     rng = random.Random(seed)
     arm_count = len(family)
     allocation = {account: [0] * arm_count for account in target_accounts}
@@ -291,11 +336,9 @@ def competitive_training_plan(candidates, accounts, budget=None, *, optimization
                 for scenario, scenario_means in enumerate(means[account]):
                     success = sequences[account][scenario][arm][count]
                     next_mean = (alpha + wins[account][scenario][arm] + success) / (alpha + beta + count + 1)
-                    selected_index = arm
-                    selected_mean = next_mean
-                    for other, other_mean in enumerate(scenario_means):
-                        if other != arm and other_mean > selected_mean:
-                            selected_index, selected_mean = other, other_mean
+                    updated = list(scenario_means)
+                    updated[arm] = next_mean
+                    selected_index = _best_arm(updated)
                     theta = latent[account][scenario]
                     after_values.append(max(theta) - theta[selected_index])
                 gain = math.fsum(old - new for old, new in zip(before, after_values)) / (
@@ -323,7 +366,7 @@ def competitive_training_plan(candidates, accounts, budget=None, *, optimization
         for _scenario in range(evaluation_scenarios):
             theta = [eval_rng.betavariate(*cells[arm][account]) for arm in range(arm_count)]
             baseline_means = [cells[arm][account][0] / sum(cells[arm][account]) for arm in range(arm_count)]
-            chosen_before = max(range(arm_count), key=lambda index: (baseline_means[index], -index))
+            chosen_before = _best_arm(baseline_means)
             eval_initial.append(max(theta) - theta[chosen_before])
             final_means = []
             for arm in range(arm_count):
@@ -331,7 +374,7 @@ def competitive_training_plan(candidates, accounts, budget=None, *, optimization
                 count = allocation[account][arm]
                 successes = sum(eval_rng.random() < theta[arm] for _ in range(count))
                 final_means.append((alpha + successes) / (alpha + beta + count))
-            chosen_after = max(range(arm_count), key=lambda index: (final_means[index], -index))
+            chosen_after = _best_arm(final_means)
             eval_final.append(max(theta) - theta[chosen_after])
 
     mean_now = math.fsum(eval_initial) / len(eval_initial)
@@ -374,7 +417,7 @@ def competitive_training_plan(candidates, accounts, budget=None, *, optimization
         "budget_default": 400,
         "budget_unassigned": budget_total - sum(item["allocation_games"] for item in result_items),
         "objective": "expected_final_simple_regret",
-        "optimizer": "greedy_common_random_numbers_v1",
+        "optimizer": _PLAN_VERSION,
         "simulation_scenarios": evaluation_scenarios,
         "optimization_scenarios": optimization_scenarios,
         "monte_carlo_se": standard_error,

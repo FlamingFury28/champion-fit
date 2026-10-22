@@ -12,6 +12,7 @@ dist
 dist-staging/
 dist-ssr
 *.local
+*.tsbuildinfo
 playwright-report/
 test-results/
 

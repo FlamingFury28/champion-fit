@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AccountDto } from '../api/types'
 import { COMPANION_FILTER_KEY, PROFILE_ACCOUNTS_KEY, PROFILE_GROUPS_KEY, createInitialScopeState, mergeProfileChanges, resolveScopeIdentities, scopeReducer } from './scope'
 
@@ -9,6 +9,12 @@ function account(account: string, aliases: string[] = []): AccountDto {
 
 describe('scope reducer e persistenza legacy', () => {
   beforeEach(() => localStorage.clear())
+  afterEach(() => vi.restoreAllMocks())
+
+  it('inizializza una selezione di sessione quando il browser nega le letture persistite', () => {
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new DOMException('Access denied', 'SecurityError') })
+    expect(createInitialScopeState()).toEqual({ accounts: [], profiles: {}, companion: null })
+  })
 
   it('legge le chiavi browser esistenti e normalizza i dati', () => {
     localStorage.setItem(PROFILE_ACCOUNTS_KEY, JSON.stringify(['Beta#EUW', 'Alpha#EUW', 'Beta#EUW']))

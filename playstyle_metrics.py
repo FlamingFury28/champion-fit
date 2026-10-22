@@ -11,6 +11,8 @@ import hashlib
 import json
 import math
 
+from storage import postgres_table_exists
+
 EXTRACTOR_VERSION = "playstyle_v1"
 METRIC_NAMES = ("farm", "vision", "participation", "turrets")
 SCHEMA_STATEMENTS = (
@@ -42,9 +44,7 @@ def ensure_schema(connection) -> None:
 
 def _exists(connection, table: str) -> bool:
     if hasattr(connection, "raw"):
-        return bool(connection.execute(
-            "SELECT 1 FROM information_schema.tables WHERE table_name=?", (table,),
-        ).fetchone())
+        return postgres_table_exists(connection, table)
     return bool(connection.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,),
     ).fetchone())

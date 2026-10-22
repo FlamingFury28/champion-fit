@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import { useState, type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { overviewQuery } from '../api/queries'
 import type { AccountDto } from '../api/types'
 import {
   COMPANION_FILTER_KEY, PROFILE_ACCOUNTS_KEY, PROFILE_GROUPS_KEY,
-  ScopeProvider, useScope,
+  ScopeProvider, useScope, type ProfileSaveResult,
 } from './scope'
 
 function account(account: string, aliases: string[] = []): AccountDto {
@@ -20,15 +21,82 @@ function ScopedConsumer() {
     <span>{overview.isSuccess ? 'scoped response loaded' : 'waiting for scope'}</span></>
 }
 
-function mountScope() {
+function mountScope(children: ReactNode = <ScopedConsumer />) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
-  const result = render(<QueryClientProvider client={client}><ScopeProvider><ScopedConsumer /></ScopeProvider></QueryClientProvider>)
+  const result = render(<QueryClientProvider client={client}><ScopeProvider>{children}</ScopeProvider></QueryClientProvider>)
   return { ...result, client }
+}
+
+function SessionControls() {
+  const scope = useScope()
+  const [saveResult, setSaveResult] = useState<ProfileSaveResult | null>(null)
+  return <><ScopedConsumer />
+    <output data-testid="persistence">{String(scope.storageAvailable)}</output>
+    <output data-testid="save-result">{JSON.stringify(saveResult)}</output>
+    <button onClick={() => scope.setAccounts(['Beta#EUW'])}>Usa Beta</button>
+    <button onClick={() => setSaveResult(scope.saveProfile('Sessione'))}>Salva profilo di sessione</button>
+    <button onClick={scope.clearCompanion}>Rimuovi companion</button>
+  </>
+}
+
+function mockAccounts() {
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const url = new URL(String(input), 'http://localhost')
+    if (url.pathname === '/api/accounts') return Response.json({ items: [account('Alpha#EUW'), account('Beta#EUW')] })
+    return Response.json({})
+  }))
 }
 
 describe('ScopeProvider con identità Riot rinominate', () => {
   beforeEach(() => localStorage.clear())
-  afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+
+  it('carica le risposte scoped anche quando localStorage nega le letture', async () => {
+    mockAccounts()
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new DOMException('Access denied', 'SecurityError') })
+    const mounted = mountScope(<SessionControls />)
+    await screen.findByText('scoped response loaded')
+    expect(screen.getByTestId('persistence')).toHaveTextContent('false')
+    expect(JSON.parse(screen.getByTestId('scope-state').textContent!)).toMatchObject({ accounts: ['Alpha#EUW', 'Beta#EUW'] })
+    mounted.unmount()
+    mounted.client.clear()
+  })
+
+  it('mantiene account e nuovi profili nella sessione quando le scritture esauriscono la quota', async () => {
+    mockAccounts()
+    localStorage.setItem(PROFILE_ACCOUNTS_KEY, JSON.stringify(['Alpha#EUW']))
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('Storage full', 'QuotaExceededError') })
+    const mounted = mountScope(<SessionControls />)
+    await screen.findByText('scoped response loaded')
+    await act(async () => screen.getByRole('button', { name: 'Usa Beta' }).click())
+    await act(async () => screen.getByRole('button', { name: 'Salva profilo di sessione' }).click())
+    expect(JSON.parse(screen.getByTestId('scope-state').textContent!)).toMatchObject({
+      accounts: ['Beta#EUW'], profiles: { Sessione: ['Beta#EUW'] },
+    })
+    expect(JSON.parse(screen.getByTestId('save-result').textContent!)).toEqual({ name: 'Sessione', applied: true, persisted: false })
+    expect(screen.getByTestId('persistence')).toHaveTextContent('false')
+    expect(JSON.parse(localStorage.getItem(PROFILE_ACCOUNTS_KEY)!)).toEqual(['Alpha#EUW'])
+    expect(localStorage.getItem(PROFILE_GROUPS_KEY)).toBeNull()
+    mounted.unmount()
+    mounted.client.clear()
+  })
+
+  it('rimuove il companion nella sessione anche quando il browser nega removeItem', async () => {
+    mockAccounts()
+    localStorage.setItem(PROFILE_ACCOUNTS_KEY, JSON.stringify(['Alpha#EUW']))
+    localStorage.setItem(COMPANION_FILTER_KEY, JSON.stringify({
+      name: 'Duo', accounts: ['Beta#EUW'], mode: 'only', profile_accounts: ['Alpha#EUW'],
+    }))
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => { throw new DOMException('Access denied', 'SecurityError') })
+    const mounted = mountScope(<SessionControls />)
+    await screen.findByText('scoped response loaded')
+    await act(async () => screen.getByRole('button', { name: 'Rimuovi companion' }).click())
+    expect(JSON.parse(screen.getByTestId('scope-state').textContent!)).toMatchObject({ companion: null })
+    expect(screen.getByTestId('persistence')).toHaveTextContent('false')
+    expect(localStorage.getItem(COMPANION_FILTER_KEY)).not.toBeNull()
+    mounted.unmount()
+    mounted.client.clear()
+  })
 
   it('invia subito soltanto il nuovo account con companion e migra tutte le chiavi persistite', async () => {
     localStorage.setItem(PROFILE_ACCOUNTS_KEY, JSON.stringify(['Old#EUW']))

@@ -32,7 +32,9 @@ from app import DB_PATH, SCHEMA_PATH, normalize_role
 from ingest import ingest, ingest_rows
 from account_identity import AccountIdentityConflict, reconcile_account_identity, reconcile_existing_identities
 from queue_rules import is_supported_queue
-from storage import SQLiteStorage
+from storage import SQLiteStorage, postgres_table_columns, postgres_table_exists
+from sync_runs import SyncRun
+from runtime_metrics import configure_logging, measure, metrics_scope, record_metric
 
 ACCOUNT_ROUTING = "europe"
 MATCH_ROUTING = "europe"
@@ -376,9 +378,7 @@ def participant_rows_from_detail(detail: Mapping[str, object], fallback_match_id
 
 def _table_exists(connection, table: str) -> bool:
     if hasattr(connection, "raw"):
-        return bool(connection.execute(
-            "SELECT 1 FROM information_schema.tables WHERE table_name=?", (table,)
-        ).fetchone())
+        return postgres_table_exists(connection, table)
     return bool(connection.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
     ).fetchone())
@@ -708,12 +708,7 @@ def canonical_participant_rows(rows: Iterable[Mapping[str, object]]) -> list[dic
 
 def _table_columns(connection, table: str) -> set[str]:
     if hasattr(connection, "raw"):
-        return {
-            str(row["column_name"])
-            for row in connection.execute(
-                "SELECT column_name FROM information_schema.columns WHERE table_name=?", (table,)
-            )
-        }
+        return postgres_table_columns(connection, table)
     return {str(row["name"]) for row in connection.execute(f"PRAGMA table_info({table})")}
 
 
@@ -1187,6 +1182,7 @@ def persist_account_materialization(connection, account: str, evidence: AccountI
         "normalized_rows": len(rows), "attempted": len(results),
         "eligible": sum(item.status in {"eligible", "identity_unresolved"} for item in results),
         "identity_unresolved": sum(item.status == "identity_unresolved" for item in results),
+        "invalid_payload": sum(item.status == "invalid_payload" for item in results),
         "removed_stale": removed, "identity_edges_persisted": edge_count,
         "playstyle_metrics_changed": playstyle["changed"],
     }
@@ -1326,6 +1322,20 @@ def reprocess_raw_matches(db_path: Path = DB_PATH) -> dict[str, int]:
     initialize_ingestion_database(db_path)
     storage = SQLiteStorage(db_path, SCHEMA_PATH)
     connection = storage.connect()
+    try:
+        pending_accounts = [str(row["account"]) for row in connection.execute(
+            "SELECT DISTINCT account FROM riot_match_list_raw ORDER BY account",
+        )]
+    finally:
+        connection.close()
+    run = SyncRun(storage, "reprocess", pending_accounts)
+    with metrics_scope("sync.reprocess", run_id=run.run_id), run:
+        record_metric("sync_accounts", len(pending_accounts))
+        return _reprocess_raw_matches(storage, run)
+
+
+def _reprocess_raw_matches(storage, run: SyncRun) -> dict[str, int]:
+    connection = storage.connect()
     totals = {key: 0 for key in (
         "accounts", "raw_known", "raw_available", "eligible", "identity_unresolved",
         "removed_stale", "identity_edges_persisted", "normalized_rows", "inserted", "updated", "skipped",
@@ -1336,12 +1346,18 @@ def reprocess_raw_matches(db_path: Path = DB_PATH) -> dict[str, int]:
         accounts = [str(row["account"]) for row in connection.execute(
             "SELECT DISTINCT account FROM riot_match_list_raw ORDER BY account",
         )]
+        run.replace_pending_accounts(connection, accounts)
         for account in accounts:
             ids, details = account_raw_matches(connection, account)
             evidence = identity_evidence(connection, account)
-            result = persist_account_materialization(
-                connection, account, evidence, details, "riot_api_raw_reprocess",
-            )
+            with measure("sync.materialization"):
+                result = persist_account_materialization(
+                    connection, account, evidence, details, "riot_api_raw_reprocess",
+                )
+            run.record_result(connection, account, result | {
+                "raw_known": len(ids), "raw_available": len(details),
+                "raw_missing": len(set(ids) - set(details)),
+            })
             totals["accounts"] += 1
             totals["raw_known"] += len(ids)
             totals["raw_available"] += len(details)
@@ -1508,7 +1524,8 @@ def match_rows(
     return rows, participants, raw_matches, ids
 
 
-def _sync(api_key: str | list[str], db_path: Path = DB_PATH, accounts: tuple[str, ...] = TRACKED_ACCOUNTS) -> dict[str, object]:
+def _sync(api_key: str | list[str], db_path: Path = DB_PATH, accounts: tuple[str, ...] = TRACKED_ACCOUNTS,
+          *, run: SyncRun | None = None) -> dict[str, object]:
     keys = api_key if isinstance(api_key, list) else [api_key]
     configure_api_keys(keys)
     initialize_ingestion_database(db_path)
@@ -1516,7 +1533,7 @@ def _sync(api_key: str | list[str], db_path: Path = DB_PATH, accounts: tuple[str
     puuids: list[tuple[str, str]] = []
     unresolved: list[str] = []
     inserted = updated = skipped = fetched_matches = removed_stale = identity_edges_persisted = 0
-    def fetch_account(account: str, account_key: str) -> tuple[str, str, dict, list[dict], list[dict], dict[str, dict], list[str]]:
+    def _fetch_account(account: str, account_key: str) -> tuple[str, str, dict, list[dict], list[dict], dict[str, dict], list[str]]:
         game_name, tag_line = riot_id(account)
         identity = riot_get(f"/riot/account/v1/accounts/by-riot-id/{quote(game_name, safe='')}/{quote(tag_line, safe='')}", account_key)
         if not isinstance(identity, Mapping):
@@ -1533,6 +1550,14 @@ def _sync(api_key: str | list[str], db_path: Path = DB_PATH, accounts: tuple[str
             account, puuid, account_key, checkpoint, evidence,
         )
         return account, puuid, identity, rows, participants, raw_matches, ids
+
+    def fetch_account(account: str, account_key: str):
+        with metrics_scope("sync.historical.account_fetch", run_id=run.run_id if run else None):
+            if run is not None:
+                with run.account_attempt(account):
+                    return _fetch_account(account, account_key)
+            else:
+                return _fetch_account(account, account_key)
 
     # Every sync must refresh the account match lists.  The normalized import
     # remains idempotent, so already-known matches are skipped without making
@@ -1567,9 +1592,15 @@ def _sync(api_key: str | list[str], db_path: Path = DB_PATH, accounts: tuple[str
             connection.execute("INSERT INTO tracked_account_puuids(puuid,account) VALUES(?,?) ON CONFLICT(puuid) DO UPDATE SET account=excluded.account", (puuid, account))
             record_verified_account_identity(connection, account, puuid, identity, fetched_at)
             _all_ids, all_details = account_raw_matches(connection, account)
-            result = persist_account_materialization(
-                connection, account, identity_evidence(connection, account, puuid, identity), all_details, "riot_api",
-            )
+            with measure("sync.materialization"):
+                result = persist_account_materialization(
+                    connection, account, identity_evidence(connection, account, puuid, identity), all_details, "riot_api",
+                )
+            if run is not None:
+                run.record_result(connection, requested_account, result | {
+                    "fetched_matches": len(rows), "raw_known": len(_all_ids),
+                    "raw_available": len(all_details), "raw_missing": len(set(_all_ids) - set(all_details)),
+                }, resolved_account=account)
             connection.commit()
         except BaseException:
             connection.rollback()
@@ -1584,9 +1615,9 @@ def _sync(api_key: str | list[str], db_path: Path = DB_PATH, accounts: tuple[str
 
     if assignments:
         with ThreadPoolExecutor(max_workers=min(len(keys), len(assignments))) as executor:
-            futures = [executor.submit(fetch_account, account, key) for account, key in assignments]
+            futures = {executor.submit(fetch_account, account, key): account for account, key in assignments}
             for future in as_completed(futures):
-                account = assignments[futures.index(future)][0]
+                account = futures[future]
                 try:
                     resolved_account, puuid, identity, rows, participants, raw_matches, ids = future.result()
                 except RiotAPIError as error:
@@ -1626,15 +1657,30 @@ def _sync(api_key: str | list[str], db_path: Path = DB_PATH, accounts: tuple[str
 def sync(api_key: str | list[str], db_path: Path = DB_PATH,
          accounts: tuple[str, ...] = TRACKED_ACCOUNTS) -> dict[str, object]:
     """Run a historical sync with a continuously refreshed process marker."""
+    initialize_ingestion_database(db_path)
+    # The journal, worker assignment and marker describe the same exact scope.
+    pending_accounts, seen_accounts = [], set()
+    for account in accounts:
+        identity_key = normalize_riot_id(account) or str(account).strip().casefold()
+        if identity_key and identity_key not in seen_accounts:
+            pending_accounts.append(str(account).strip())
+            seen_accounts.add(identity_key)
+    accounts = tuple(pending_accounts)
+    storage = SQLiteStorage(db_path, SCHEMA_PATH)
     marker = SyncActivityMarker(db_path, len(accounts))
     marker.start()
     try:
-        return _sync(api_key, db_path, accounts)
+        with metrics_scope("sync.historical", run_id=marker.run_id), SyncRun(
+            storage, "historical", accounts, run_id=marker.run_id,
+        ) as run:
+            record_metric("sync_accounts", len(accounts))
+            return _sync(api_key, db_path, accounts, run=run)
     finally:
         marker.close()
 
 
 def main() -> None:
+    configure_logging()
     parser = argparse.ArgumentParser(description="Importa le partite Riot di Summoner's Rift nel database Champion Fit")
     parser.add_argument("--api-key", default=os.environ.get("RIOT_API_KEY"), help="Riot API key; preferibile RIOT_API_KEY")
     parser.add_argument("--api-keys", default=os.environ.get("RIOT_API_KEYS"), help="Più chiavi separate da virgola o punto e virgola")

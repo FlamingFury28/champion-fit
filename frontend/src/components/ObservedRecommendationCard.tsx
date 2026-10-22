@@ -1,8 +1,9 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowRight, ThumbsDown, ThumbsUp } from 'lucide-react'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Link } from 'react-router'
-import { ApiError, postJson } from '../api/client'
+import { ApiError } from '../api/client'
+import { saveRecommendationFeedback } from '../api/mutations'
 import type { ObservedRecommendationDto, RecommendationFeedbackInputDto, RecommendationPreference } from '../api/types'
 import { pct } from '../app/filters'
 import { roleLabel, tagLabel, translateModelText } from '../app/labels'
@@ -20,12 +21,17 @@ function preferenceLabel(value: RecommendationPreference | null) {
 }
 
 function confidenceLabel(value: number | string) {
-  if (typeof value === 'number') return pct(value <= 1 ? value * 100 : value, 0)
+  if (typeof value === 'number') return pct(value <= 1 ? value * 100 : value, 3)
   return value || 'copertura indicativa'
 }
 
 function catalogTagLabel(value: string) {
   return tagLabel(value.includes(':') ? value.slice(value.indexOf(':') + 1) : value)
+}
+
+interface FeedbackRequest {
+  input: RecommendationFeedbackInputDto
+  target: string
 }
 
 export function RecommendationFeedback({ item, accounts, allowAllAccountsShortcut, feedbackRevision }: {
@@ -37,29 +43,40 @@ export function RecommendationFeedback({ item, accounts, allowAllAccountsShortcu
   void allowAllAccountsShortcut
   const queryClient = useQueryClient()
   const [selectedAccounts, setSelectedAccounts] = useState(accounts)
+  const [conflictRevision, setConflictRevision] = useState<number | null>(null)
+  const [refreshState, setRefreshState] = useState<'idle' | 'pending' | 'error'>('idle')
+  const submissionInFlight = useRef(false)
+  const refreshInFlight = useRef(false)
+  const refresh = async () => {
+    if (refreshInFlight.current) return
+    refreshInFlight.current = true
+    setRefreshState('pending')
+    const results = await Promise.allSettled([
+      queryClient.invalidateQueries({ queryKey: ['api', 'recommendations'] }, { throwOnError: true }),
+      queryClient.invalidateQueries({ queryKey: ['api', 'recommendation-feedback'] }, { throwOnError: true }),
+    ])
+    refreshInFlight.current = false
+    setRefreshState(results.some((result) => result.status === 'rejected') ? 'error' : 'idle')
+  }
   const feedback = useMutation({
-    mutationFn: (preference: RecommendationPreference) => postJson<unknown>('/api/recommendation-feedback', {
-      accounts: selectedAccounts,
-      champion: item.champion,
-      role: item.role,
-      preference,
-      expected_revision: feedbackRevision,
-    } satisfies RecommendationFeedbackInputDto),
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['api', 'recommendations'] }),
-        queryClient.invalidateQueries({ queryKey: ['api', 'recommendation-feedback'] }),
-      ])
-    },
-    onError: async (error) => {
+    mutationFn: ({ input }: FeedbackRequest) => saveRecommendationFeedback(input),
+    onMutate: () => { setConflictRevision(null) },
+    onSuccess: refresh,
+    onError: async (error, request) => {
       if (error instanceof ApiError && error.status === 409) {
-        await Promise.all([
-          queryClient.invalidateQueries({ queryKey: ['api', 'recommendations'] }),
-          queryClient.invalidateQueries({ queryKey: ['api', 'recommendation-feedback'] }),
-        ])
+        setConflictRevision(request.input.expected_revision)
+        await refresh()
       }
     },
+    onSettled: () => { submissionInFlight.current = false },
   })
+  // The ledger can refresh independently; only the snapshot supplying this card's token can unlock a retry.
+  const needsConflictRefresh = conflictRevision !== null && feedbackRevision <= conflictRevision
+  const conflictStatus = conflictRevision === null ? null
+    : refreshState === 'pending' ? 'Le preferenze sono cambiate altrove. Sto ricaricando la revisione corrente.'
+      : needsConflictRefresh && refreshState === 'error' ? 'Non riesco ad aggiornare le preferenze correnti. Ricarica prima di riprovare il giudizio.'
+        : needsConflictRefresh ? 'La revisione corrente non è ancora aggiornata. Ricarica prima di riprovare il giudizio.'
+          : 'Le preferenze sono cambiate altrove. La revisione corrente è aggiornata: riprova il giudizio.'
   const toggleAccount = (account: string) => setSelectedAccounts((current) => current.includes(account)
     ? current.filter((value) => value !== account)
     : [...current, account])
@@ -67,7 +84,23 @@ export function RecommendationFeedback({ item, accounts, allowAllAccountsShortcu
     ? `tutti i ${accounts.length} account selezionati`
     : selectedAccounts.length ? `${selectedAccounts.length} di ${accounts.length} account selezionati` : 'nessun account selezionato'
   const submit = (value: RecommendationPreference) => {
-    if (selectedAccounts.length && !feedback.isPending) feedback.mutate(value)
+    if (submissionInFlight.current || feedback.isPending || refreshInFlight.current) return
+    if (needsConflictRefresh) {
+      void refresh()
+      return
+    }
+    if (!selectedAccounts.length) return
+    submissionInFlight.current = true
+    feedback.mutate({
+      input: {
+        accounts: [...selectedAccounts],
+        champion: item.champion,
+        role: item.role,
+        preference: value,
+        expected_revision: feedbackRevision,
+      },
+      target: `${preferenceLabel(value)} · ${recommendationName(item)} · ${roleLabel(item.role)} · ${selectedAccounts.join(', ')}`,
+    })
   }
 
   return <div className="recommendation-feedback">
@@ -81,12 +114,16 @@ export function RecommendationFeedback({ item, accounts, allowAllAccountsShortcu
       </fieldset>
     </details> : <p className="recommendation-feedback__scope">{accounts[0] ? `Si applica a ${accounts[0]}.` : 'Nessun account attivo per questa preferenza.'}</p>}
     <div className="recommendation-feedback__actions" aria-label={`Preferenza per ${recommendationName(item)}`}>
-      <button type="button" className="button button--secondary button--compact" aria-pressed={item.feedback === 'like'} disabled={!selectedAccounts.length || feedback.isPending} onClick={() => submit('like')}><ThumbsUp aria-hidden="true" /> Mi piace</button>
-      <button type="button" className="button button--ghost button--compact" aria-pressed={item.feedback === 'neutral'} disabled={!selectedAccounts.length || feedback.isPending} onClick={() => submit('neutral')}>Neutro</button>
-      <button type="button" className="button button--secondary button--compact" aria-pressed={item.feedback === 'dislike'} disabled={!selectedAccounts.length || feedback.isPending} onClick={() => submit('dislike')}><ThumbsDown aria-hidden="true" /> Non fa per me</button>
+      {needsConflictRefresh ? <button type="button" className="button button--secondary button--compact" disabled={refreshState === 'pending' || feedback.isPending} onClick={() => void refresh()}>{refreshState === 'pending' ? 'Ricarico preferenze…' : 'Ricarica preferenze'}</button> : <>
+      <button type="button" className="button button--secondary button--compact" aria-pressed={item.feedback === 'like'} disabled={!selectedAccounts.length || feedback.isPending || refreshState === 'pending'} onClick={() => submit('like')}><ThumbsUp aria-hidden="true" /> Mi piace</button>
+      <button type="button" className="button button--ghost button--compact" aria-pressed={item.feedback === 'neutral'} disabled={!selectedAccounts.length || feedback.isPending || refreshState === 'pending'} onClick={() => submit('neutral')}>Neutro</button>
+      <button type="button" className="button button--secondary button--compact" aria-pressed={item.feedback === 'dislike'} disabled={!selectedAccounts.length || feedback.isPending || refreshState === 'pending'} onClick={() => submit('dislike')}><ThumbsDown aria-hidden="true" /> Non fa per me</button>
+      </>}
     </div>
-    {feedback.isPending ? <span role="status">Salvataggio della preferenza…</span> : null}
-    {feedback.isError ? <p className="field-error" role="alert">{feedback.error instanceof ApiError && feedback.error.status === 409 ? 'Le preferenze sono cambiate altrove. Ho ricaricato la revisione corrente: riprova il giudizio.' : feedback.error.message}</p> : null}
+    {conflictStatus ? <p className="field-error" role={refreshState === 'pending' ? 'status' : 'alert'}>{conflictStatus}<br />{feedback.variables?.target}</p>
+      : feedback.isPending ? <span role="status">Salvataggio della preferenza… {feedback.variables?.target}</span>
+        : feedback.isError ? <p className="field-error" role="alert">{feedback.error.message}<br />{feedback.variables?.target}</p> : null}
+    {feedback.isSuccess ? <span role="status">Preferenza salvata. {feedback.variables?.target}</span> : null}
   </div>
 }
 

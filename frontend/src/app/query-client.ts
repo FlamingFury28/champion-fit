@@ -1,6 +1,6 @@
 import { QueryCache, QueryClient } from '@tanstack/react-query'
-import { ApiError, getJson } from '../api/client'
-import type { AlgorithmSettingsResponseDto } from '../api/types'
+import { getAlgorithmSettings } from '../api/algorithm-settings'
+import { ApiError } from '../api/client'
 
 export const queryClient = new QueryClient({
   queryCache: new QueryCache({
@@ -9,8 +9,9 @@ export const queryClient = new QueryClient({
       if (query.queryKey[0] !== 'api' || query.queryKey[1] === 'algorithm-settings') return
       void queryClient.fetchQuery({
         queryKey: ['api', 'algorithm-settings'],
-        queryFn: ({ signal }) => getJson<AlgorithmSettingsResponseDto>('/api/algorithm-settings', undefined, signal),
+        queryFn: ({ signal }) => getAlgorithmSettings(signal),
         staleTime: 0,
+        retry: false,
       }).catch(() => undefined)
     },
   }),
@@ -18,7 +19,7 @@ export const queryClient = new QueryClient({
     queries: {
       staleTime: 30_000,
       gcTime: 10 * 60_000,
-      retry: (failureCount, error) => !(error instanceof ApiError && error.status === 409) && failureCount < 1,
+      retry: (failureCount, error) => !(error instanceof ApiError && (error.status === 400 || error.status === 409)) && failureCount < 1,
       refetchOnWindowFocus: true,
     },
     mutations: {

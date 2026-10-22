@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
-"""Serve the production build against a disposable synthetic SQLite fixture."""
+"""Serve the production build against a disposable SQLite or PostgreSQL fixture."""
 
 from __future__ import annotations
 
 import sqlite3
+import argparse
+import json
 import os
+import re
 import sys
 import tempfile
+import uuid
+from contextlib import contextmanager
 from functools import partial
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -17,7 +22,7 @@ PROJECT_ROOT = FRONTEND_ROOT.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 import app  # noqa: E402
-from storage import SQLiteStorage  # noqa: E402
+from storage import PostgresStorage, SQLiteStorage  # noqa: E402
 
 
 CHAMPIONS = {
@@ -41,7 +46,8 @@ def seed(database_path: Path) -> SQLiteStorage:
         )
         connection.executemany(
             "INSERT INTO source_metadata(key,value) VALUES(?,?)",
-            [("window", "fixture E2E · 2026-08-24"), ("source", "synthetic")],
+            [("window", "fixture E2E · 2026-08-24"), ("source", "synthetic"),
+             ("last_sync_at", "2026-08-24T12:30:00+00:00")],
         )
         fit_rows = [
             ("global", "MIDDLE", "Ahri", 24, 15, 9, .625, 14.2, 7.1, 21.3, 68.4, 12.3, .684, .53, .81, .28, .82, 2, "Alpha#EUW,Beta#EUW", 10, 1, 0, 0, "none", "", .62),
@@ -125,24 +131,105 @@ def seed(database_path: Path) -> SQLiteStorage:
     return storage
 
 
+POSTGRES_MANIFEST_ENV = "CHAMPION_FIT_E2E_POSTGRES_MANIFEST"
+POSTGRES_SCHEMA_PATTERN = re.compile(r"champion_fit_e2e_[0-9a-f]{32}")
+
+
+def _drop_fixture_schema(base_dsn: str, schema: str) -> None:
+    if not isinstance(schema, str) or not POSTGRES_SCHEMA_PATTERN.fullmatch(schema):
+        raise ValueError("Invalid E2E PostgreSQL schema")
+    import psycopg
+    from psycopg import sql
+
+    with psycopg.connect(base_dsn, autocommit=True) as admin:
+        admin.execute(sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(sql.Identifier(schema)))
+
+
+def cleanup_postgres_fixture() -> bool:
+    manifest_value = os.environ.get(POSTGRES_MANIFEST_ENV)
+    if not manifest_value:
+        return False
+    manifest = Path(manifest_value)
+    try:
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return False
+    if (not isinstance(payload, dict) or set(payload) != {"schema"}
+            or not isinstance(payload["schema"], str)
+            or not POSTGRES_SCHEMA_PATTERN.fullmatch(payload["schema"])):
+        raise ValueError("Invalid E2E PostgreSQL cleanup manifest")
+    base_dsn = os.environ.get("CHAMPION_FIT_E2E_POSTGRES_DSN")
+    if not base_dsn:
+        raise ValueError("E2E PostgreSQL cleanup requires CHAMPION_FIT_E2E_POSTGRES_DSN")
+    _drop_fixture_schema(base_dsn, payload["schema"])
+    manifest.unlink(missing_ok=True)
+    return True
+
+
+@contextmanager
+def fixture_storage(database_path: Path):
+    storage = seed(database_path)
+    base_dsn = os.environ.get("CHAMPION_FIT_E2E_POSTGRES_DSN")
+    if not base_dsn:
+        yield storage
+        return
+
+    import psycopg
+    from psycopg import sql
+    from psycopg.conninfo import make_conninfo
+    from migrate_postgres import migrate
+
+    schema = f"champion_fit_e2e_{uuid.uuid4().hex}"
+    manifest_value = os.environ.get(POSTGRES_MANIFEST_ENV)
+    manifest = Path(manifest_value) if manifest_value else None
+    created = owns_manifest = False
+    try:
+        # Commit the schema only after recording ownership. A process killed
+        # before commit leaves no persistent schema to leak.
+        with psycopg.connect(base_dsn) as admin:
+            admin.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+            created = True
+            if manifest is not None:
+                with manifest.open("x", encoding="utf-8") as output:
+                    owns_manifest = True
+                    json.dump({"schema": schema}, output)
+        scoped_dsn = make_conninfo(base_dsn, options=f"-c search_path={schema}")
+        migrate(database_path, scoped_dsn)
+        postgres = PostgresStorage(scoped_dsn, PROJECT_ROOT / "schema.sql")
+        postgres.initialize()
+        yield postgres
+    finally:
+        if created:
+            _drop_fixture_schema(base_dsn, schema)
+            if owns_manifest:
+                manifest.unlink(missing_ok=True)
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--cleanup-postgres-fixture", action="store_true")
+    args = parser.parse_args()
+    if args.cleanup_postgres_fixture:
+        cleanup_postgres_fixture()
+        return
     dist = Path(os.environ.get("CHAMPION_FIT_E2E_DIST", str(FRONTEND_ROOT / "dist"))).resolve()
     if not (dist / "index.html").is_file():
         raise SystemExit("frontend/dist mancante: esegui npm run build")
     with tempfile.TemporaryDirectory(prefix="champion-fit-e2e-") as temp:
         temp_path = Path(temp)
-        app.STORAGE = seed(temp_path / "fixture.db")
         app.DB_PATH = temp_path / "fixture.db"
         app.APP_ROOT = temp_path
-        handler = partial(app.DashboardHandler, directory=dist)
-        port = int(os.environ.get("CHAMPION_FIT_E2E_PORT", "18787"))
-        host = os.environ.get("CHAMPION_FIT_E2E_HOST", "127.0.0.1")
-        server = ThreadingHTTPServer((host, port), handler)
-        print(f"Champion Fit E2E: http://{host}:{port}", flush=True)
-        try:
-            server.serve_forever()
-        finally:
-            server.server_close()
+        with fixture_storage(app.DB_PATH) as storage:
+            app.STORAGE = storage
+            handler = partial(app.DashboardHandler, directory=dist)
+            port = int(os.environ.get("CHAMPION_FIT_E2E_PORT", "18787"))
+            host = os.environ.get("CHAMPION_FIT_E2E_HOST", "127.0.0.1")
+            server = ThreadingHTTPServer((host, port), handler)
+            print(f"Champion Fit E2E ({storage.engine}): http://{host}:{port}", flush=True)
+            try:
+                server.serve_forever()
+            finally:
+                server.server_close()
 
 
 if __name__ == "__main__":

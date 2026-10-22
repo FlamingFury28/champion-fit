@@ -4,9 +4,10 @@ import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { scopeQuery, type ScopeSnapshot } from '../api/client'
 import { playstyleEvidenceQuery, playstylesQuery, type PlaystyleBehavior, type PlaystyleCategory, type PlaystyleComparison, type PlaystyleDays, type PlaystyleFilters, type PlaystyleSource, type PlaystylesResponse } from '../api/playstyles'
-import { formatDate } from '../app/filters'
+import { canonicalRole, formatDate, ROLES } from '../app/filters'
 import { credibleMassLabel, getSetting, useAlgorithmSettings } from '../app/algorithm-settings'
-import { roleLabel } from '../app/labels'
+import { queueLabel, roleLabel } from '../app/labels'
+import { canonicalQueueFilter } from '../app/queue-filter'
 import { championHref } from '../app/navigation'
 import { useScope } from '../app/scope'
 import { BehaviorRadar } from '../components/BehaviorRadar'
@@ -18,13 +19,14 @@ const number = (value: number | null | undefined, digits = 1) => value == null |
 const percentage = (value: number | null | undefined) => value == null ? 'Non stimabile' : `${number(value)}%`
 const liftLabel = (value: number | null | undefined) => value == null ? 'Confronto non stimabile' : `${value > 0 ? '+' : ''}${number(value)} punti`
 const kindLabel = (kind: string) => /class/i.test(kind) ? 'Classe' : 'Stile dettagliato'
-const interval = (item: { lower?: number | null; upper?: number | null; lower_90?: number | null; upper_90?: number | null }) => ({
-  lower: item.lower ?? item.lower_90,
-  upper: item.upper ?? item.upper_90,
-})
-const baselineInterval = (item: PlaystyleCategory) => ({
-  lower: item.baseline_lower ?? item.baseline_lower_90,
-  upper: item.baseline_upper ?? item.baseline_upper_90,
+const interval = (item: { lower?: number | null; upper?: number | null; lower_90?: number | null; upper_90?: number | null }) => (
+  item.lower !== undefined || item.upper !== undefined
+    ? { lower: item.lower ?? null, upper: item.upper ?? null }
+    : { lower: item.lower_90 ?? null, upper: item.upper_90 ?? null }
+)
+const baselineInterval = (item: PlaystyleCategory) => interval({
+  lower: item.baseline_lower, upper: item.baseline_upper,
+  lower_90: item.baseline_lower_90, upper_90: item.baseline_upper_90,
 })
 
 function Sources({ sources }: { sources: PlaystyleSource[] }) {
@@ -49,7 +51,7 @@ function Evidence({ scope, filters, category }: { scope: ScopeSnapshot; filters:
         <tbody>{evidence.data.matches.map((match) => <tr key={`${match.account}-${match.match_id}`}>
           <td><StatusBadge tone={match.win ? 'positive' : 'negative'}>{match.win ? 'Vittoria' : 'Sconfitta'}</StatusBadge></td>
           <th scope="row">{match.champion}<small className="playstyles-cell-detail">{roleLabel(match.role)} · {number(match.duration_minutes)} min</small></th>
-          <td>{match.account}</td><td>{match.match_id}</td><td>{formatDate(match.date)}</td><td>{match.note || '—'}</td>
+          <td>{match.account}</td><td>{match.match_id}</td><td>{formatDate(match.date_utc ?? match.date)}</td><td>{match.note || '—'}</td>
         </tr>)}</tbody>
       </DataTable> : <p className="micro-empty">Nessuna partita in questa pagina per i filtri attivi.</p>}
       <nav className="playstyles-pagination" aria-label={`Paginazione prove ${category.label}`}>
@@ -62,7 +64,8 @@ function Evidence({ scope, filters, category }: { scope: ScopeSnapshot; filters:
 }
 
 function CategoryCard({ item, scope, filters, trainingHref, inExplorer = false }: { item: PlaystyleCategory; scope: ScopeSnapshot; filters: PlaystyleFilters; trainingHref: string; inExplorer?: boolean }) {
-  const { credibleMass: confidenceMass } = useAlgorithmSettings()
+  const { credibleMass } = useAlgorithmSettings()
+  const confidenceMass = item.credible_mass ?? credibleMass
   const [expanded, setExpanded] = useState(false)
   const [showMatches, setShowMatches] = useState(false)
   const supported = item.supported
@@ -129,7 +132,7 @@ function Suggestions({ data, params }: { data: PlaystylesResponse; params: URLSe
     {suggestions.exploratory ? <p className="playstyles-coverage-gap">Selezione esplorativa: il campione disponibile non conferma ancora un vantaggio dell’archetipo.</p> : null}
     <div className="playstyles-suggestion-columns">
       <div><h3>Già giocati</h3><p>Risultati osservati nel ruolo, nella coda e nel periodo selezionati.</p>
-        {suggestions.played.length ? <ul className="playstyles-champions">{suggestions.played.map((item) => { const bounds = interval(item); return <li key={item.champion}><strong><Link state={{ championSheetFromList: true }} to={championHref(item.champion, data.filters.role, params)}>{item.name || item.champion}</Link></strong><span>{item.games} partite · {item.wins}V / {item.losses}S</span><b>{percentage(item.mean)}</b><small>Intervallo binomiale al {credibleMassLabel(confidenceMass)} {number(bounds.lower)}–{number(bounds.upper)}%</small></li> })}</ul> : <p className="micro-empty">Nessun campione già giocato in questa categoria e in questo contesto.</p>}
+        {suggestions.played.length ? <ul className="playstyles-champions">{suggestions.played.map((item) => { const bounds = interval(item); return <li key={item.champion}><strong><Link state={{ championSheetFromList: true }} to={championHref(item.champion, data.filters.role, params)}>{item.name || item.champion}</Link></strong><span>{item.games} partite · {item.wins}V / {item.losses}S</span><b>{percentage(item.mean)}</b><small>Intervallo binomiale al {credibleMassLabel(item.credible_mass ?? confidenceMass)} {number(bounds.lower)}–{number(bounds.upper)}%</small></li> })}</ul> : <p className="micro-empty">Nessun campione già giocato in questa categoria e in questo contesto.</p>}
       </div>
       <div><h3>Mai provati</h3><p>Affinità di catalogo. Non è una probabilità di vittoria né una prova di compatibilità personale.</p>
         <p>Affinità di catalogo: sovrapposizione dei tag da 0 a 1, rispetto al campione di riferimento più simile della categoria.</p>
@@ -140,6 +143,7 @@ function Suggestions({ data, params }: { data: PlaystylesResponse; params: URLSe
 }
 
 function Results({ data, scope, filters, trainingHref }: { data: PlaystylesResponse; scope: ScopeSnapshot; filters: PlaystyleFilters; trainingHref: (category: string) => string }) {
+  const { credibleMass } = useAlgorithmSettings()
   const [search, setSearch] = useState('')
   const [order, setOrder] = useState('support')
   const searchTerm = search.trim().toLocaleLowerCase('it')
@@ -187,6 +191,7 @@ function Results({ data, scope, filters, trainingHref }: { data: PlaystylesRespo
             sample: item.games,
             low: interval(item).lower,
             high: interval(item).upper,
+            intervalLabel: `Intervallo binomiale al ${credibleMassLabel(item.credible_mass ?? credibleMass)}`,
             reference: item.baseline_games > 0 ? item.baseline_mean : null,
             tone: item.supported ? 'positive' : 'warning',
             details: <CategoryCard item={item} scope={scope} filters={filters} trainingHref={trainingHref(item.id)} inExplorer />,
@@ -222,9 +227,10 @@ export function playstyleDaysFromSettings(value: unknown): PlaystyleDays {
 }
 
 export function playstyleFiltersFromParams(params: URLSearchParams, defaultDays: PlaystyleDays, defaultQueue = '420'): PlaystyleFilters {
+  const rawRole = params.get('role')
   const rawDays = params.get('days')
-  const days = rawDays === '90' || rawDays === '180' || rawDays === '365' || rawDays === 'all' ? rawDays : defaultDays
-  return { role: params.get('role') || 'ALL', queue: params.get('queue') || defaultQueue, days, category: params.get('category') || undefined }
+  const days = rawDays || defaultDays
+  return { role: canonicalRole(rawRole) || rawRole || 'ALL', queue: canonicalQueueFilter(params.get('queue') || defaultQueue) || defaultQueue, days, category: params.get('category') || undefined }
 }
 
 export function PlaystyleSuggestionsPanel() {
@@ -249,6 +255,7 @@ export function PlaystylesPage({ embedded = false }: { embedded?: boolean }) {
   const defaultQueue = String(getSetting(settings, 'context.queue') || '420')
   const filters = playstyleFiltersFromParams(params, defaultDays, defaultQueue)
   const days = filters.days
+  const daysKnown = ['90', '180', '365', 'all'].includes(days)
   const result = useQuery({ ...playstylesQuery(scope, filters), enabled: scopeReady })
   const data = result.data
   const selectedRole = filters.role ?? 'ALL'
@@ -256,7 +263,9 @@ export function PlaystylesPage({ embedded = false }: { embedded?: boolean }) {
   const roles = [...new Set(data?.options.roles ?? [])]
   if (selectedRole !== 'ALL' && !roles.includes(selectedRole)) roles.push(selectedRole)
   const queues = [...(data?.options.queues ?? [])]
-  if (selectedQueue !== 'all' && !queues.some((queue) => queue.id === selectedQueue)) queues.push({ id: selectedQueue, label: selectedQueue })
+  const selectedQueueKnown = ['all', '400', '420', '430', '440', '450', '480', '490', '700'].includes(selectedQueue)
+  const selectedQueueUnavailable = selectedQueue !== 'all' && !selectedQueueKnown && !queues.some((queue) => queue.id === selectedQueue)
+  if (selectedQueue !== 'all' && !queues.some((queue) => queue.id === selectedQueue)) queues.push({ id: selectedQueue, label: selectedQueueKnown ? queueLabel(selectedQueue) : 'Modalità del link' })
   const update = (key: string, value: string) => setParams((current) => {
     const next = new URLSearchParams(current)
     if (value) next.set(key, value)
@@ -279,9 +288,12 @@ export function PlaystylesPage({ embedded = false }: { embedded?: boolean }) {
     <PageHeader level={embedded ? 2 : 1} eyebrow="Esplorazione / Stili di gioco" title={<>Quali stili <em>funzionano per te?</em></>} copy="Archetipi dei campioni e comportamento osservato: due letture separate delle partite degli account selezionati." />
     <nav className="playstyles-section-links" aria-label="Sezioni stili di gioco"><a href="#playstyle-archetypes">Archetipi</a><a href="#playstyle-behavior">Comportamento osservato</a></nav>
     <FilterBar className="playstyles-context">
-      <label>Ruolo degli stili<select value={selectedRole} onChange={(event) => update('role', event.target.value)}><option value="ALL">Tutti i ruoli · aggregato</option>{roles.map((role) => <option key={role} value={role}>{roleLabel(role)}</option>)}</select></label>
-      <label>Modalità degli stili<select value={selectedQueue} onChange={(event) => update('queue', event.target.value)}><option value="all">Tutte le modalità · aggregato</option>{queues.map((queue) => <option key={queue.id} value={queue.id}>{queue.label}</option>)}</select></label>
-      <label>Periodo degli stili<select value={days} onChange={(event) => update('days', event.target.value === 'all' ? '' : event.target.value)}><option value="90">Ultimi 90 giorni</option><option value="180">Ultimi 180 giorni</option><option value="365">Ultimi 365 giorni</option><option value="all">Tutto lo storico</option></select></label>
+      <label>Ruolo degli stili<select value={selectedRole} onChange={(event) => update('role', event.target.value)}><option value="ALL">Tutti i ruoli · aggregato</option>{roles.map((role) => {
+        const known = ROLES.includes(role as typeof ROLES[number])
+        return <option key={role} value={role} disabled={!known}>{known ? roleLabel(role) : canonicalRole(role) ? 'Ruolo non valido' : 'Ruolo automatico'}</option>
+      })}</select></label>
+      <label>Modalità degli stili<select value={selectedQueue} onChange={(event) => update('queue', event.target.value)}><option value="all">Tutte le modalità · aggregato</option>{queues.map((queue) => <option key={queue.id} value={queue.id} disabled={selectedQueueUnavailable && queue.id === selectedQueue}>{queue.label}</option>)}</select></label>
+      <label>Periodo degli stili<select value={days} onChange={(event) => update('days', event.target.value)}>{!daysKnown ? <option value={days} disabled>Periodo del link</option> : null}<option value="90">Ultimi 90 giorni</option><option value="180">Ultimi 180 giorni</option><option value="365">Ultimi 365 giorni</option><option value="all">Tutto lo storico</option></select></label>
     </FilterBar>
     {data ? <p className="playstyles-auto">Contesto analizzato: {roleLabel(data.filters.role)} · {data.filters.queue === 'all' ? 'tutte le modalità · aggregato' : queues.find((queue) => queue.id === data.filters.queue)?.label ?? data.filters.queue} · {data.filters.days === 'all' ? 'tutto lo storico' : `ultimi ${data.filters.days} giorni`}.</p> : null}
     {data && data.summary.observations === 0 ? <EmptyState title="Nessuna partita per questi filtri" description="Scegli un ruolo, una modalità o un periodo con storico disponibile. I filtri espliciti restano invariati e non c’è un vantaggio sostenuto da mostrare." /> : null}

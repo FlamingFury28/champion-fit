@@ -63,6 +63,22 @@ describe('ChampionDetailPage nuovo motore', () => {
     expect(params.get('days')).toBe('90')
   })
 
+  it('ripristina il contesto della scheda da un link aggiornato o ricaricato senza alterare quello della lista', async () => {
+    const fetch = setup(observedRecommendation(), '&queue=all&days=all&detailQueue=440&detailDays=90')
+    await screen.findByText(/Ahri fa già parte delle tue scelte/)
+    const params = new URL(String(fetch.mock.calls[0]?.[0]), 'http://localhost').searchParams
+    expect(params.get('queue')).toBe('440')
+    expect(params.get('days')).toBe('90')
+  })
+
+  it('non inventa il contesto della scheda se un link legacy non lo specifica', async () => {
+    const fetch = setup()
+    await screen.findByText(/Ahri fa già parte delle tue scelte/)
+    const params = new URL(String(fetch.mock.calls[0]?.[0]), 'http://localhost').searchParams
+    expect(params.has('queue')).toBe(false)
+    expect(params.has('days')).toBe(false)
+  })
+
   it('presenta una scoperta come affinità senza inventare risultati personali', async () => {
     setup(discoveryRecommendation())
     expect(await screen.findByText(/Orianna è una scoperta vicina ai tuoi gusti/)).toBeVisible()

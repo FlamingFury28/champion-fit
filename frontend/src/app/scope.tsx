@@ -7,6 +7,7 @@ import {
   useMemo,
   useReducer,
   useRef,
+  useState,
   type PropsWithChildren,
 } from 'react'
 import { normalizeAccounts, sameAccounts, type CompanionFilterState, type ScopeSnapshot } from '../api/client'
@@ -41,9 +42,27 @@ type ScopeAction =
   | { type: 'set-companion'; companion: CompanionFilterState }
   | { type: 'clear-companion' }
 
+function readStorage(key: string): { value: string | null; available: boolean } {
+  try {
+    return { value: localStorage.getItem(key), available: true }
+  } catch {
+    return { value: null, available: false }
+  }
+}
+
+function writeStorage(key: string, value: string | null): boolean {
+  try {
+    if (value === null) localStorage.removeItem(key)
+    else localStorage.setItem(key, value)
+    return true
+  } catch {
+    return false
+  }
+}
+
 function readJson<T>(key: string, fallback: T): T {
   try {
-    const value = JSON.parse(localStorage.getItem(key) ?? 'null') as T | null
+    const value = JSON.parse(readStorage(key).value ?? 'null') as T | null
     return value ?? fallback
   } catch {
     return fallback
@@ -65,7 +84,7 @@ function parseProfiles(value: string | null): Record<string, string[]> {
 }
 
 function readProfiles(): Record<string, string[]> {
-  return parseProfiles(localStorage.getItem(PROFILE_GROUPS_KEY))
+  return parseProfiles(readStorage(PROFILE_GROUPS_KEY).value)
 }
 
 function sameProfiles(left: Record<string, string[]>, right: Record<string, string[]>): boolean {
@@ -83,20 +102,20 @@ export function mergeProfileChanges(
   incoming: Record<string, string[]>,
   baseline: Record<string, string[]>,
 ): Record<string, string[]> {
-  const merged: Record<string, string[]> = {}
+  const merged: [string, string[]][] = []
   const names = new Set([...Object.keys(local), ...Object.keys(incoming), ...Object.keys(baseline)])
   for (const name of names) {
-    const current = local[name]
-    const remote = incoming[name]
-    const previous = baseline[name]
+    const current = Object.hasOwn(local, name) ? local[name] : undefined
+    const remote = Object.hasOwn(incoming, name) ? incoming[name] : undefined
+    const previous = Object.hasOwn(baseline, name) ? baseline[name] : undefined
     const localChanged = !sameAccounts(current ?? [], previous ?? []) || Boolean(current) !== Boolean(previous)
     const remoteChanged = !sameAccounts(remote ?? [], previous ?? []) || Boolean(remote) !== Boolean(previous)
     const selected = localChanged && remoteChanged && !sameAccounts(current ?? [], remote ?? [])
       ? current
       : localChanged ? current : remote
-    if (selected) merged[name] = normalizeAccounts(selected)
+    if (selected) merged.push([name, normalizeAccounts(selected)])
   }
-  return merged
+  return Object.fromEntries(merged)
 }
 
 function readCompanion(): CompanionFilterState | null {
@@ -222,6 +241,7 @@ export function scopeReducer(state: ScopeState, action: ScopeAction): ScopeState
 
 export interface AccountSelectionResult {
   accounts: string[]
+  appliedAccounts: string[]
   missing: string[]
   companionCleared: boolean
   changed: boolean
@@ -232,6 +252,12 @@ export interface CompanionSelectionResult {
   missing: string[]
 }
 
+export interface ProfileSaveResult {
+  name: string
+  applied: boolean
+  persisted: boolean
+}
+
 interface ScopeContextValue {
   state: ScopeState
   scope: ScopeSnapshot
@@ -240,11 +266,12 @@ interface ScopeContextValue {
   accountsError: Error | null
   scopeReady: boolean
   scopeEmpty: boolean
+  storageAvailable: boolean
   algorithmSettingsLoading: boolean
   algorithmSettingsError: Error | null
   retryAccounts: () => void
   setAccounts: (accounts: string[]) => AccountSelectionResult
-  saveProfile: (name: string, accounts?: string[]) => void
+  saveProfile: (name: string, accounts?: string[]) => ProfileSaveResult
   deleteProfile: (name: string) => void
   setCompanion: (companion: Omit<CompanionFilterState, 'profileAccounts'>) => CompanionSelectionResult
   clearCompanion: () => void
@@ -255,6 +282,13 @@ const ScopeContext = createContext<ScopeContextValue | null>(null)
 export function ScopeProvider({ children }: PropsWithChildren) {
   const algorithmSettings = useAlgorithmSettings()
   const [state, dispatch] = useReducer(scopeReducer, undefined, createInitialScopeState)
+  const [storageState, setStorageState] = useState(() => ({
+    profiles: readStorage(PROFILE_GROUPS_KEY).available,
+    scope: readStorage(PROFILE_ACCOUNTS_KEY).available && readStorage(COMPANION_FILTER_KEY).available,
+  }))
+  const setStorageAvailable = useCallback((kind: keyof typeof storageState, available: boolean) => {
+    setStorageState((current) => current[kind] === available ? current : { ...current, [kind]: available })
+  }, [])
   const accounts = useQuery(accountsQuery)
   const availableAccounts = useMemo(() => accounts.data?.items ?? [], [accounts.data])
   const resolvedState = useMemo(
@@ -263,12 +297,13 @@ export function ScopeProvider({ children }: PropsWithChildren) {
   )
   const resolvedAccounts = accounts.data ? resolvedState.accounts : []
   const stateRef = useRef(resolvedState)
-  const profilesBaselineRef = useRef(readProfiles())
-  // A previously successful account response remains a validated scope if a
-  // later background refresh fails. Only the initial response may block boot.
+  const profilesBaselineRef = useRef(state.profiles)
+  // Validated account and settings snapshots survive background refresh
+  // failures. Their revision stays explicit until a new snapshot is loaded.
+  const algorithmSettingsError = algorithmSettings.data ? null : algorithmSettings.error
   const scopeReady = Boolean(
     accounts.data && availableAccounts.length > 0 && resolvedAccounts.length > 0
-    && !algorithmSettings.isPending && !algorithmSettings.error,
+    && !algorithmSettings.isPending && !algorithmSettingsError,
   )
 
   useEffect(() => {
@@ -281,20 +316,32 @@ export function ScopeProvider({ children }: PropsWithChildren) {
   }, [resolvedState])
 
   useEffect(() => {
-    const storedProfiles = readProfiles()
-    const nextProfiles = mergeProfileChanges(resolvedState.profiles, storedProfiles, profilesBaselineRef.current)
-    profilesBaselineRef.current = nextProfiles
-    if (!sameProfiles(storedProfiles, nextProfiles)) {
-      localStorage.setItem(PROFILE_GROUPS_KEY, JSON.stringify(nextProfiles))
+    const stored = readStorage(PROFILE_GROUPS_KEY)
+    if (!stored.available) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Browser persistence availability is known only after synchronizing with storage.
+      setStorageAvailable('profiles', false)
+      return
     }
+    const storedProfiles = parseProfiles(stored.value)
+    const nextProfiles = mergeProfileChanges(resolvedState.profiles, storedProfiles, profilesBaselineRef.current)
+    const persisted = sameProfiles(storedProfiles, nextProfiles)
+      || writeStorage(PROFILE_GROUPS_KEY, JSON.stringify(nextProfiles))
+    profilesBaselineRef.current = persisted ? nextProfiles : storedProfiles
+    setStorageAvailable('profiles', persisted)
     if (!sameProfiles(resolvedState.profiles, nextProfiles)) {
       dispatch({ type: 'sync-profiles', profiles: nextProfiles })
     }
-  }, [resolvedState.profiles])
+  }, [resolvedState.profiles, setStorageAvailable])
 
   useEffect(() => {
     const syncProfiles = (event: StorageEvent) => {
-      if (event.storageArea !== localStorage || event.key !== PROFILE_GROUPS_KEY) return
+      if (event.key !== PROFILE_GROUPS_KEY) return
+      try {
+        if (event.storageArea !== localStorage) return
+      } catch {
+        setStorageAvailable('profiles', false)
+        return
+      }
       const incoming = parseProfiles(event.newValue)
       const nextProfiles = mergeProfileChanges(stateRef.current.profiles, incoming, profilesBaselineRef.current)
       profilesBaselineRef.current = incoming
@@ -304,21 +351,21 @@ export function ScopeProvider({ children }: PropsWithChildren) {
     }
     window.addEventListener('storage', syncProfiles)
     return () => window.removeEventListener('storage', syncProfiles)
-  }, [])
+  }, [setStorageAvailable])
 
   useEffect(() => {
-    localStorage.setItem(PROFILE_ACCOUNTS_KEY, JSON.stringify(resolvedState.accounts))
-    if (resolvedState.companion) {
-      localStorage.setItem(COMPANION_FILTER_KEY, JSON.stringify({
+    const accountsPersisted = writeStorage(PROFILE_ACCOUNTS_KEY, JSON.stringify(resolvedState.accounts))
+    const companionPersisted = writeStorage(COMPANION_FILTER_KEY, resolvedState.companion
+      ? JSON.stringify({
         name: resolvedState.companion.name,
         accounts: resolvedState.companion.accounts,
         mode: resolvedState.companion.mode,
         profile_accounts: resolvedState.companion.profileAccounts,
-      }))
-    } else {
-      localStorage.removeItem(COMPANION_FILTER_KEY)
-    }
-  }, [resolvedState.accounts, resolvedState.companion])
+      })
+      : null)
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Report browser write/remove failures while keeping the active session selection.
+    setStorageAvailable('scope', accountsPersisted && companionPersisted)
+  }, [resolvedState.accounts, resolvedState.companion, setStorageAvailable])
 
   const setAccounts = useCallback((next: string[]) => {
     const available = availableAccounts.map((item) => item.account)
@@ -326,20 +373,32 @@ export function ScopeProvider({ children }: PropsWithChildren) {
     const valid = available.length ? requested.filter((account) => available.includes(account)) : requested
     const missing = available.length ? requested.filter((account) => !available.includes(account)) : []
     if (available.length && !valid.length) {
-      return { accounts: resolvedState.accounts, missing, companionCleared: false, changed: false }
+      return { accounts: resolvedState.accounts, appliedAccounts: [], missing, companionCleared: false, changed: false }
     }
     const changed = !sameAccounts(valid, resolvedState.accounts)
     const companionCleared = changed && Boolean(resolvedState.companion)
-    if (!changed) return { accounts: valid, missing, companionCleared: false, changed: false }
+    if (!changed) return { accounts: valid, appliedAccounts: valid, missing, companionCleared: false, changed: false }
     dispatch({ type: 'set-accounts', accounts: valid })
-    return { accounts: valid, missing, companionCleared, changed: true }
+    return { accounts: valid, appliedAccounts: valid, missing, companionCleared, changed: true }
   }, [availableAccounts, resolvedState.accounts, resolvedState.companion])
 
   const saveProfile = useCallback((name: string, selected = resolvedState.accounts) => {
     const cleanName = name.trim().slice(0, 80)
-    if (!cleanName || !selected.length) return
-    dispatch({ type: 'save-profile', name: cleanName, accounts: selected.map(accountResolver(availableAccounts)) })
-  }, [availableAccounts, resolvedState.accounts])
+    if (!cleanName || !selected.length) return { name: cleanName, applied: false, persisted: false }
+    const selectedAccounts = normalizeAccounts(selected.map(accountResolver(availableAccounts)))
+    const draft = { ...resolvedState.profiles, [cleanName]: selectedAccounts }
+    const stored = readStorage(PROFILE_GROUPS_KEY)
+    const merged = stored.available
+      ? mergeProfileChanges(draft, parseProfiles(stored.value), profilesBaselineRef.current)
+      : draft
+    // An explicit save/overwrite must keep the submitted selection for this name.
+    const profiles = { ...merged, [cleanName]: selectedAccounts }
+    const persisted = stored.available && writeStorage(PROFILE_GROUPS_KEY, JSON.stringify(profiles))
+    if (persisted) profilesBaselineRef.current = profiles
+    setStorageAvailable('profiles', persisted)
+    dispatch({ type: 'sync-profiles', profiles })
+    return { name: cleanName, applied: true, persisted }
+  }, [availableAccounts, resolvedState.accounts, resolvedState.profiles, setStorageAvailable])
 
   const setCompanion = useCallback((companion: Omit<CompanionFilterState, 'profileAccounts'>) => {
     const available = availableAccounts.map((item) => item.account)
@@ -367,8 +426,9 @@ export function ScopeProvider({ children }: PropsWithChildren) {
     accountsError: accounts.data ? null : accounts.error,
     scopeReady,
     scopeEmpty: accounts.isSuccess && availableAccounts.length === 0,
+    storageAvailable: storageState.profiles && storageState.scope,
     algorithmSettingsLoading: algorithmSettings.isPending,
-    algorithmSettingsError: algorithmSettings.error,
+    algorithmSettingsError,
     retryAccounts: () => { void accounts.refetch() },
     setAccounts,
     saveProfile,

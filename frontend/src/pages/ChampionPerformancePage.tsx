@@ -2,13 +2,16 @@ import { useQuery } from '@tanstack/react-query'
 import { Search } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router'
 import { championsQuery } from '../api/queries'
+import { credibleMassLabel } from '../app/algorithm-settings'
 import { normalizeRole, pct, ROLES, useDebouncedValue } from '../app/filters'
 import { queueLabel, roleLabel } from '../app/labels'
 import { championHref } from '../app/navigation'
+import { canonicalQueueFilter } from '../app/queue-filter'
 import { useScope } from '../app/scope'
 import { ChampionAvatar, DataTable, DecisionSummary, EmptyState, ErrorState, FilterBar, PageHeader, QueryResults, Skeleton, StatusBadge, Surface } from '../components/ui'
 
 const playableRoles = ROLES.filter((role) => role !== 'ALL')
+const queues = ['420', '440', '400', '430', '490', '480', '700']
 
 function periodLabel(days: unknown) {
   if (String(days) === 'all') return 'tutto lo storico'
@@ -31,10 +34,11 @@ function liftLabel(value: number | null | undefined) {
 export function ChampionPerformancePage({ embedded = false }: { embedded?: boolean }) {
   const { scope, scopeReady } = useScope()
   const [params, setParams] = useSearchParams()
-  const explicitRole = params.get('role') ?? ''
-  const role = params.has('role') ? normalizeRole(explicitRole) : undefined
-  const queue = params.get('queue') ?? ''
+  const role = params.has('role') ? normalizeRole(params.get('role')) : undefined
+  const queue = canonicalQueueFilter(params.get('queue')) ?? ''
+  const queueKnown = queue === '' || queue === 'all' || queues.includes(queue)
   const days = params.get('days') ?? ''
+  const daysKnown = days === '' || ['90', '180', '365', 'all'].includes(days)
   const search = params.get('search') ?? ''
   const debouncedSearch = useDebouncedValue(search)
   const status = params.get('performance') ?? 'ALL'
@@ -52,15 +56,18 @@ export function ChampionPerformancePage({ embedded = false }: { embedded?: boole
   const selectedAccounts = scope.accounts.length ? scope.accounts.join(', ') : 'tutti gli account attivi'
   const currentContext = data?.context ?? {}
   const modelMessage = data?.model?.message ?? 'Il modello gerarchico è esplorativo finché non supera la validazione temporale.'
+  const intervalMass = first?.credible_mass
+  const intervalLabel = typeof intervalMass === 'number' && Number.isFinite(intervalMass) && intervalMass > 0 && intervalMass < 1 && items.every((item) => item.credible_mass === intervalMass)
+    ? `Intervallo ${credibleMassLabel(intervalMass)}` : 'Intervallo'
 
   return <div className="page-stack">
     <PageHeader level={embedded ? 2 : 1} eyebrow="Campioni / Rendimento" title="Quali giochi meglio?" copy="Confronta i risultati osservati per account, ruolo, modalità e periodo. I pick con pochi dati restano visibili come segnali da verificare." aside={result.isFetching && data ? <StatusBadge tone="info">Aggiornamento</StatusBadge> : undefined} />
 
     <FilterBar>
       <div className="filter-bar__intro"><strong>Contesto del confronto</strong><span>Account attivi: {selectedAccounts}. Cambia account dal selettore globale.</span></div>
-      <label>Ruolo<select value={explicitRole} onChange={(event) => update('role', event.target.value)}><option value="">Automatico</option><option value="ALL">Tutti i ruoli</option>{playableRoles.map((value) => <option key={value} value={value}>{roleLabel(value)}</option>)}</select></label>
-      <label>Modalità<select value={queue} onChange={(event) => update('queue', event.target.value)}><option value="">Predefinita</option><option value="all">Tutte le modalità</option>{['420', '440', '400', '430', '490', '480', '700'].map((value) => <option key={value} value={value}>{queueLabel(value)}</option>)}</select></label>
-      <label>Periodo<select value={days} onChange={(event) => update('days', event.target.value)}><option value="">Predefinito</option><option value="90">90 giorni</option><option value="180">180 giorni</option><option value="365">365 giorni</option><option value="all">Tutto lo storico</option></select></label>
+      <label>Ruolo<select value={role ?? ''} onChange={(event) => update('role', event.target.value)}><option value="">Automatico</option><option value="ALL">Tutti i ruoli</option>{playableRoles.map((value) => <option key={value} value={value}>{roleLabel(value)}</option>)}</select></label>
+      <label>Modalità<select value={queue} onChange={(event) => update('queue', event.target.value)}>{!queueKnown ? <option value={queue} disabled>Modalità del link</option> : null}<option value="">Predefinita</option><option value="all">Tutte le modalità</option>{queues.map((value) => <option key={value} value={value}>{queueLabel(value)}</option>)}</select></label>
+      <label>Periodo<select value={days} onChange={(event) => update('days', event.target.value)}>{!daysKnown ? <option value={days} disabled>Periodo del link</option> : null}<option value="">Predefinito</option><option value="90">90 giorni</option><option value="180">180 giorni</option><option value="365">365 giorni</option><option value="all">Tutto lo storico</option></select></label>
       <label>Segnale<select value={status} onChange={(event) => update('performance', event.target.value)}><option value="ALL">Tutti</option><option value="supported">Vantaggio storico supportato</option><option value="promising">Positivi da verificare</option></select></label>
       <label className="search-field">Cerca<span><Search aria-hidden="true" /><input value={search} onChange={(event) => update('search', event.target.value)} placeholder="es. Ahri" /></span></label>
       <span className="filter-count" role="status">{result.isFetching && !result.isPending ? 'Aggiornamento…' : `${items.length} coppie campione/ruolo`}</span>
@@ -77,9 +84,9 @@ export function ChampionPerformancePage({ embedded = false }: { embedded?: boole
       />
       <Surface><div className="section-heading"><div><p className="eyebrow">Contesto effettivo</p><h2>{roleLabel(String(currentContext.role ?? ''))} · {queueLabel(String(currentContext.queue ?? ''))}</h2></div><StatusBadge tone="neutral">{periodLabel(currentContext.days)}</StatusBadge></div><p className="section-copy">{Number(currentContext.unique_games ?? 0)} partite uniche nel perimetro. Il modello usa esiti binari e standardizza l’account; gli effetti di modalità, patch e lobby sono parzialmente condivisi. La stima descrive associazioni storiche, non un effetto causale.</p></Surface>
       <QueryResults label="Classifica del rendimento storico" aria-busy={result.isFetching}>
-        {items.length ? <DataTable label="Campioni ordinati per rendimento stimato"><thead><tr><th>Campione</th><th>Ruolo</th><th>Partite uniche</th><th>Stima aggiustata</th><th>Intervallo 90%</th><th>Scarto dal riferimento</th><th>Account coperti</th><th>Segnale</th></tr></thead><tbody>{items.map((item) => {
+        {items.length ? <DataTable label="Campioni ordinati per rendimento stimato"><thead><tr><th>Campione</th><th>Ruolo</th><th>Partite uniche</th><th>Stima aggiustata</th><th>{intervalLabel}</th><th>Scarto dal riferimento</th><th>Account coperti</th><th>Segnale</th></tr></thead><tbody>{items.map((item) => {
           const signal = signalLabel(item.classification, Boolean(item.historical_supported))
-          const detail = championHref(item.champion, item.role, params)
+          const detail = championHref(item.champion, item.role, params, currentContext)
           return <tr key={`${item.champion}-${item.role}`}>
             <th scope="row"><Link className="champion-link champion-link--interactive" state={{ championSheetFromList: true }} to={detail}><ChampionAvatar name={item.champion} src={item.icon_url} size="sm" /><span>{item.champion}</span></Link></th>
             <td>{roleLabel(item.role)}</td>

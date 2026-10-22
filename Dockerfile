@@ -2,8 +2,10 @@ FROM node:24-alpine AS frontend-build
 
 WORKDIR /build/frontend
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
-COPY frontend/ ./
+RUN --mount=type=cache,id=champion-fit-npm,target=/root/.npm,sharing=locked npm ci
+COPY frontend/index.html frontend/tsconfig.json frontend/vite.config.ts ./
+COPY frontend/public/ ./public/
+COPY frontend/src/ ./src/
 RUN npm run build
 
 
@@ -15,7 +17,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+RUN --mount=type=cache,id=champion-fit-pip,target=/root/.cache/pip,sharing=locked python -m pip install -r requirements.txt
 
 COPY *.py ./
 COPY schema.sql ./

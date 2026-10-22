@@ -12,6 +12,9 @@ from datetime import datetime, timezone
 from types import MappingProxyType
 from typing import Any, Iterator, Mapping
 
+from queue_rules import SUPPORTED_QUEUE_IDS
+from storage import SQL_INTEGER_MAX
+
 
 class SettingsValidationError(ValueError):
     """Raised when a complete settings document violates its schema."""
@@ -149,7 +152,7 @@ _SCHEMA = _freeze([
     _field("evidence.display_min_games", "Partite per visualizzare", "Supporto minimo per mostrare una stima.", "integer", "Evidenza", 1, 500),
     _field("evidence.indicative_games", "Partite indicative", "Supporto minimo per un segnale indicativo.", "integer", "Evidenza", 1, 500),
     _field("evidence.recommendation_limit", "Limite raccomandazioni", "Numero massimo di raccomandazioni mostrate.", "integer", "Evidenza", 1, 40),
-    _field("context.queue", "Coda", "Coda predefinita dell'analisi.", "select", "Contesto", options=["420", "440", "400", "430", "490"]),
+    _field("context.queue", "Coda", "Coda predefinita dell'analisi.", "select", "Contesto", options=sorted(SUPPORTED_QUEUE_IDS)),
     _field("context.days", "Periodo", "Finestra temporale predefinita in giorni.", "select", "Contesto", options=[90, 180, 365, "all"]),
     _field("attribution.duration_bounds", "Fasce durata", "Cinque soglie crescenti che definiscono sei fasce.", "number[]", "Attribuzione", 1, 90),
     _field("attribution.loss_weights", "Pesi sconfitte", "Sei pesi non decrescenti per fascia di durata.", "number[]", "Attribuzione", 0, 1),
@@ -271,7 +274,7 @@ def validate_settings(settings: Mapping[str, Any]) -> dict[str, Any]:
 
     context = _require_keys(source["context"], set(_RECOMMENDED["context"]), "context")
     queue = context["queue"]
-    if type(queue) is not str or queue not in {"420", "440", "400", "430", "490"}:
+    if type(queue) is not str or queue not in SUPPORTED_QUEUE_IDS:
         raise SettingsValidationError("context.queue must be a canonical queue id")
     days = context["days"]
     if type(days) is not int and days != "all":
@@ -476,30 +479,34 @@ def ensure_settings(connection: Any) -> None:
 
 
 def _snapshot(connection: Any) -> dict[str, Any]:
-    row = connection.execute(
-        """SELECT r.revision,r.fingerprint,r.settings_json
+    # One statement keeps the active pointer and history coherent even when
+    # the caller has not opened a transaction with a stable read snapshot.
+    history_rows = connection.execute(
+        """SELECT s.current_revision,r.revision,r.fingerprint,r.settings_json,r.created_at
         FROM algorithm_settings_state s
-        JOIN algorithm_settings_revisions r ON r.revision=s.current_revision
-        WHERE s.singleton_id=1"""
-    ).fetchone()
+        CROSS JOIN algorithm_settings_revisions r
+        WHERE s.singleton_id=1 ORDER BY r.revision DESC"""
+    ).fetchall()
+    current_revision = _row_value(history_rows[0], "current_revision", 0) if history_rows else None
+    row = next(
+        (item for item in history_rows if int(_row_value(item, "revision", 1)) == current_revision),
+        None,
+    )
     if row is None:
         raise _SettingsStoreUninitialized("algorithm settings store is not initialized")
-    history_rows = connection.execute(
-        "SELECT revision,fingerprint,settings_json,created_at FROM algorithm_settings_revisions ORDER BY revision DESC"
-    ).fetchall()
     history = [
         {
-            "revision": int(_row_value(item, "revision", 0)),
-            "fingerprint": _row_value(item, "fingerprint", 1),
-            "settings": json.loads(_row_value(item, "settings_json", 2)),
-            "created_at": _row_value(item, "created_at", 3),
+            "revision": int(_row_value(item, "revision", 1)),
+            "fingerprint": _row_value(item, "fingerprint", 2),
+            "settings": json.loads(_row_value(item, "settings_json", 3)),
+            "created_at": _row_value(item, "created_at", 4),
         }
         for item in history_rows
     ]
     return {
-        "revision": int(_row_value(row, "revision", 0)),
-        "fingerprint": _row_value(row, "fingerprint", 1),
-        "settings": json.loads(_row_value(row, "settings_json", 2)),
+        "revision": int(_row_value(row, "revision", 1)),
+        "fingerprint": _row_value(row, "fingerprint", 2),
+        "settings": json.loads(_row_value(row, "settings_json", 3)),
         "defaults": recommended_settings(),
         "schema": _plain(_SCHEMA),
         "history": history,
@@ -624,8 +631,8 @@ def save_settings(
     connection: Any, expected_revision: int, settings: Mapping[str, Any]
 ) -> dict[str, Any]:
     """Append and activate settings when ``expected_revision`` is current."""
-    if type(expected_revision) is not int or expected_revision < 0:
-        raise ValueError("expected_revision must be a non-negative integer")
+    if type(expected_revision) is not int or not 0 <= expected_revision <= SQL_INTEGER_MAX:
+        raise ValueError(f"expected_revision must be an integer between 0 and {SQL_INTEGER_MAX}")
     normalized = validate_settings(settings)
     fingerprint = fingerprint_settings(normalized)
     owns_transaction = _begin_write(connection)
@@ -659,10 +666,12 @@ def save_settings(
         )
         if activated.rowcount != 1:
             raise RuntimeError("settings revision changed during save")
+        # Capture this write's acknowledgement before releasing its CAS lock.
+        snapshot = _snapshot(connection)
         _finish_write(connection, owns_transaction)
     except SettingsConflictError:
         raise
     except Exception:
         _abort_write(connection, owns_transaction)
         raise
-    return _snapshot(connection)
+    return snapshot

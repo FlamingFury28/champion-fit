@@ -1,12 +1,13 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { aggregateRecentPerformance, RecentPerformance, type RecentPerformanceMatch } from './RecentPerformance'
 import { championSplashUrl } from './ChampionArtwork'
 
 const observation = (date: string, win: 0 | 1, values: Partial<RecentPerformanceMatch> = {}): RecentPerformanceMatch => ({ date, win, account: 'Alpha#EUW', role: 'MIDDLE', ...values })
 
 describe('aggregateRecentPerformance', () => {
+  afterEach(() => vi.unstubAllEnvs())
   it('ordina le date effettive e aggrega gli esiti per giorno UTC senza riempire i giorni vuoti', () => {
     const result = aggregateRecentPerformance([
       observation('2026-09-08T12:00:00Z', 0),
@@ -40,9 +41,82 @@ describe('aggregateRecentPerformance', () => {
     expect(result.days).toHaveLength(1)
     expect(result.days[0]!.wins).toBe(0)
   })
+
+  it('conserva le osservazioni canoniche degli anni 0001–0099 restituite dal server', () => {
+    const dates = ['0001-01-01', '0004-02-29', '0099-12-31', '0100-01-01', '2026-09-01']
+    const result = aggregateRecentPerformance(dates.map((date) => observation(`${date}T12:00:00Z`, 1, {
+      date_utc: `${date}T12:00:00.000000+00:00`,
+    })))
+
+    expect(result.invalid).toBe(0)
+    expect(result.days.map((day) => day.date)).toEqual(dates)
+    expect(result.days.every((day) => Number.isFinite(day.timestamp) && day.wins === 1 && day.matches.length === 1)).toBe(true)
+  })
+
+  it('esclude ore che slittano al giorno dopo e istanti UTC fuori dall’intervallo del server', () => {
+    const result = aggregateRecentPerformance([
+      observation('2026-09-01T24:00:00Z', 1),
+      observation('2026-09-01 24:00:00', 0),
+      observation('0000-01-01T12:00:00Z', 1),
+      observation('0001-01-01T00:30:00+01:00', 1),
+      observation('9999-12-31T23:30:00-01:00', 0),
+    ])
+
+    expect(result.invalid).toBe(5)
+    expect(result.days).toEqual([])
+  })
+
+  it.each(['Europe/Rome', 'America/New_York'])('interpreta le date ISO senza offset come UTC anche nel fuso %s', (timezone) => {
+    vi.stubEnv('TZ', timezone)
+    const result = aggregateRecentPerformance([
+      observation('2026-10-17T00:30:00', 1),
+      observation('2026-10-17 23:30:00', 0),
+    ])
+
+    expect(result.invalid).toBe(0)
+    expect(result.days.map(({ date, wins, matches }) => [date, wins, matches.length])).toEqual([
+      ['2026-10-17', 1, 2],
+    ])
+  })
+
+  it('usa date_utc per date compatte e week date, rispettando ordine e giorno canonici senza modificare la data originale', () => {
+    const compact = observation('20261018T003000+0200', 0, { date_utc: '2026-10-17T22:30:00.000499+00:00' })
+    const week = observation('2026-W42-6T00:30:00+02:00', 1, { date_utc: '2026-10-16T22:30:00.000000+00:00' })
+    const result = aggregateRecentPerformance([compact, week])
+
+    expect(result.invalid).toBe(0)
+    expect(result.days.map(({ date, wins, matches }) => [date, wins, matches.length])).toEqual([
+      ['2026-10-16', 1, 1], ['2026-10-17', 0, 1],
+    ])
+    expect(result.days[0]!.matches[0]!.date).toBe('2026-W42-6T00:30:00+02:00')
+    expect(compact.date).toBe('20261018T003000+0200')
+  })
+
+  it('ripiega sulla data originale quando date_utc manca e non normalizza un calendario canonico impossibile', () => {
+    const result = aggregateRecentPerformance([
+      observation('2026-10-17T00:30:00', 1, { date_utc: null }),
+      observation('2026-10-17T00:30:00Z', 1, { date_utc: '2026-02-30T00:30:00.000000+00:00' }),
+    ])
+
+    expect(result.invalid).toBe(1)
+    expect(result.days.map(({ date, matches }) => [date, matches.length])).toEqual([['2026-10-17', 1]])
+  })
 })
 
 describe('RecentPerformance', () => {
+  it('mostra le partite con data sorgente compatta o week date quando il server fornisce date_utc', () => {
+    render(<RecentPerformance matches={[
+      observation('20261017T003000+0200', 1, { date_utc: '2026-10-16T22:30:00.000000+00:00', champion: 'Ahri' }),
+      observation('2026-W42-6T013000+0200', 0, { date_utc: '2026-10-16T23:30:00.000000+00:00', champion: 'Lux' }),
+    ]} />)
+
+    expect(screen.getByRole('combobox', { name: 'Esamina un giorno' })).toHaveValue('2026-10-16')
+    const details = screen.getByRole('list', { name: /Osservazioni del 16 ott 2026/ })
+    expect(within(details).getByText(/Ahri/)).toBeVisible()
+    expect(within(details).getByText(/Lux/)).toBeVisible()
+    expect(screen.getByText(/1 vittoria e 1 sconfitta/)).toBeVisible()
+    expect(screen.queryByText(/escluse.*data.*non validi/)).not.toBeInTheDocument()
+  })
   it('in modalità compatta mantiene i limiti visibili e rivela la selezione giornaliera su richiesta', async () => {
     const user = userEvent.setup()
     render(<RecentPerformance compact matches={[

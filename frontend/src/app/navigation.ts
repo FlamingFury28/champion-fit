@@ -1,3 +1,5 @@
+import { canonicalRole } from './filters'
+
 /** Canonical destinations shared by navigation, contextual links and old bookmarks. */
 export const destinations = {
   overview: '/app/overview',
@@ -18,19 +20,47 @@ export function withParams(path: string, params: URLSearchParams) {
   return `${path}${params.size ? `?${params.toString()}` : ''}`
 }
 
-export function sectionHref(path: string, section: string, params: URLSearchParams) {
+export function withoutChampionDetail(params: URLSearchParams) {
   const next = new URLSearchParams(params)
+  for (const key of ['detail', 'detailRole', 'detailQueue', 'detailDays']) next.delete(key)
+  return next
+}
+
+export interface ResolvedRecommendationContext {
+  readonly role: string
+  readonly queue: string
+}
+
+export function sectionHref(path: string, section: string, params: URLSearchParams, context?: ResolvedRecommendationContext) {
+  const next = withoutChampionDetail(params)
+  if (path === destinations.champions
+    && ['choices', 'training'].includes(params.get('section') ?? '')
+    && ['best', 'tournament', 'matchups'].includes(section)) {
+    const role = canonicalRole(params.get('role'))
+    if (role === 'MID') next.set('role', 'MIDDLE')
+    else if (role === 'ADC') next.set('role', 'BOTTOM')
+    // The recommendation view treats this exact legacy token as all history.
+    if (params.get('days') === '0') next.set('days', 'all')
+    if (context) {
+      next.set('role', context.role)
+      next.set('queue', context.queue)
+    }
+  }
   next.set('section', section)
-  next.delete('detail')
-  next.delete('detailRole')
   return withParams(path, next)
 }
 
-export function championHref(champion: string, role: string, params = new URLSearchParams()) {
-  const next = new URLSearchParams(params)
+export function championHref(champion: string, role: string, params = new URLSearchParams(), context?: { queue?: unknown; days?: unknown }) {
+  const next = withoutChampionDetail(params)
   if (!['choices', 'best', 'tournament', 'matchups', 'training'].includes(next.get('section') ?? '')) next.set('section', 'best')
   next.set('detail', champion)
   next.set('detailRole', role || 'ALL')
+  for (const [source, target] of [['queue', 'detailQueue'], ['days', 'detailDays']] as const) {
+    const value = context?.[source]
+    if ((typeof value === 'string' && value.trim()) || (typeof value === 'number' && Number.isFinite(value))) {
+      next.set(target, String(value))
+    }
+  }
   return withParams(destinations.champions, next)
 }
 

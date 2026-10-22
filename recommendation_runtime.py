@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from algorithm_settings import current_settings
-from analysis_runtime import parse_time
+from analysis_runtime import parse_time, subtract_days_clamped
 from champion_taxonomy import canonical_champion, champion_entry, load_catalog
 from playstyle_analysis import canonical_queue
 
@@ -14,10 +14,12 @@ ROLES = {"TOP", "JUNGLE", "MIDDLE", "BOTTOM", "SUPPORT"}
 
 def _latest_matches_per_account(rows, maximum):
     grouped = defaultdict(list)
+    minimum_time = datetime.min.replace(tzinfo=timezone.utc)
     for row in rows:
         played_at = parse_time(row["date"])
         grouped[row["account"]].append((
-            (played_at.timestamp() if played_at else float("-inf"), str(row["match_id"])), row,
+            # UTC datetimes retain microseconds that epoch floats can merge.
+            (played_at is not None, played_at or minimum_time, str(row["match_id"])), row,
         ))
     return [
         row
@@ -141,7 +143,7 @@ def recommendation_data(connection, params, *, account_filter, companion_filter)
         period = {"value": int(configured_period["value"]), "unit": configured_period["unit"]}
         days = str(period["value"]) if period["unit"] == "days" and period["value"] else "all"
     cutoff = (
-        now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=period["value"])
+        subtract_days_clamped(now.replace(hour=0, minute=0, second=0, microsecond=0), period["value"])
         if period["unit"] == "days" and period["value"] > 0 else None
     )
     # Future facts are never allowed to inform either preferences or novelty.

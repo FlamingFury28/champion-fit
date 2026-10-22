@@ -73,7 +73,9 @@ const tags: Record<string, string> = {
 }
 
 export function tagLabel(value: string) {
-  return tags[value.trim().toLowerCase().replace(/[\s-]+/g, '_')] ?? value.replace(/_/g, ' ')
+  const key = value.trim().toLowerCase().replace(/[\s-]+/g, '_')
+  const label = Object.hasOwn(tags, key) ? tags[key] : undefined
+  return label ?? value.replace(/_/g, ' ')
 }
 
 const anomalyFlags: Record<string, string> = {
@@ -99,7 +101,8 @@ export function anomalyFlagsLabel(value: string | null | undefined) {
   if (!value?.trim()) return 'Nessuna anomalia'
   return value.split(/[;,]/).map((flag) => {
     const key = flag.trim().toLowerCase()
-    return anomalyFlags[key] ?? flag.trim().replace(/_/g, ' ')
+    const label = Object.hasOwn(anomalyFlags, key) ? anomalyFlags[key] : undefined
+    return label ?? flag.trim().replace(/_/g, ' ')
   }).filter(Boolean).join(' · ')
 }
 
@@ -123,7 +126,8 @@ const modelDescriptions: Record<string, string> = {
 
 /** Apply only to generated model descriptions, never to player names or notes. */
 export function translateModelText(value: string) {
-  const known = modelDescriptions[value.trim().toLowerCase()]
+  const key = value.trim().toLowerCase()
+  const known = Object.hasOwn(modelDescriptions, key) ? modelDescriptions[key] : undefined
   if (known) return known
   return value
     .replace(/expected evidence\/game/gi, 'peso informativo atteso per partita')
@@ -186,5 +190,6 @@ const apiErrors: Record<string, string> = {
 
 export function apiErrorLabel(value: string) {
   if (/^Error response\b/i.test(value)) return 'Il server non ha potuto completare la richiesta. Riprova tra poco.'
-  return apiErrors[value.trim().toLowerCase()] ?? value
+  const key = value.trim().toLowerCase()
+  return (Object.hasOwn(apiErrors, key) ? apiErrors[key] : undefined) ?? value
 }

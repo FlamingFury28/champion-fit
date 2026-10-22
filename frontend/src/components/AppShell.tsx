@@ -107,7 +107,7 @@ export function isKnownApplicationPath(pathname: string) {
 export function ScopedOutlet() {
   const location = useLocation()
   const { accountsLoading, accountsError, scopeEmpty, scopeReady, retryAccounts, algorithmSettingsLoading, algorithmSettingsError } = useScope()
-  const { refetch: retryAlgorithmSettings } = useAlgorithmSettings()
+  const { refetch: retryAlgorithmSettings, refreshError, isFetching: refreshingSettings } = useAlgorithmSettings()
 
   if (!isKnownApplicationPath(location.pathname)) return <Outlet />
   if (location.pathname.startsWith(destinations.algorithmSettings) || location.pathname === destinations.siteMap) return <Outlet />
@@ -139,13 +139,18 @@ export function ScopedOutlet() {
       />
     )
   }
-  return <Outlet />
+  return <>
+    {refreshError ? <div className="scope-refresh-banner scope-refresh-banner--action" role="status">
+      <RefreshCw aria-hidden="true" />
+      <span>Non riesco ad aggiornare la configurazione. Uso l’ultima configurazione disponibile e conservo le modifiche in corso.</span>
+      <button className="button button--secondary button--compact" type="button" disabled={refreshingSettings} onClick={() => { void retryAlgorithmSettings() }}>{refreshingSettings ? 'Riprovo…' : 'Riprova aggiornamento'}</button>
+    </div> : null}
+    <Outlet />
+  </>
 }
 
 function AppChrome() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
-  const mobileMenuButton = useRef<HTMLButtonElement>(null)
-  const restoreMobileMenuFocus = useRef(true)
   const mainContent = useRef<HTMLElement>(null)
   const previousPath = useRef<string | null>(null)
   const previousSync = useRef<SyncStatusResponseDto | undefined>(undefined)
@@ -183,21 +188,14 @@ function AppChrome() {
         <Brand />
         <Navigation />
         <SiteMapLink />
-        <button ref={mobileMenuButton} className="mobile-menu-button" type="button" aria-label="Apri il menu" onClick={() => setMobileNavOpen(true)}>
+        <button className="mobile-menu-button" type="button" aria-label="Apri il menu" onClick={() => setMobileNavOpen(true)}>
           <Menu aria-hidden="true" />
           <span>Menu</span>
         </button>
         <ScopeBar />
       </header>
-      <Drawer open={mobileNavOpen} onOpenChange={(open) => {
-        setMobileNavOpen(open)
-        if (open) restoreMobileMenuFocus.current = true
-        if (!open && restoreMobileMenuFocus.current) window.requestAnimationFrame(() => mobileMenuButton.current?.focus())
-      }} title="Esplora Champion Fit">
-        <Navigation onNavigate={() => {
-          restoreMobileMenuFocus.current = false
-          setMobileNavOpen(false)
-        }} />
+      <Drawer open={mobileNavOpen} onOpenChange={setMobileNavOpen} title="Esplora Champion Fit">
+        <Navigation onNavigate={() => setMobileNavOpen(false)} />
       </Drawer>
       <div className="app-content">
         <main ref={mainContent} id="main-content" tabIndex={-1}>

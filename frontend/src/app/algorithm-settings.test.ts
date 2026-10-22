@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { credibleBounds, getSetting, setSetting } from './algorithm-settings'
+import { credibleBounds, credibleMassLabel, getSetting, setSetting } from './algorithm-settings'
 import { historicalSettingsDraft, settingOptionLabel } from '../pages/AlgorithmSettingsPage'
 
 describe('algorithm settings helpers', () => {
+  it('conserva la parte decimale della copertura dell’intervallo', () => {
+    expect(credibleMassLabel(.955)).toBe('95,5%')
+    expect(credibleMassLabel(.9)).toBe('90%')
+  })
+
   it('updates a nested draft without mutating the active settings', () => {
     const active = { evidence: { credible_mass: 0.9 }, training: { budget: 20 } }
     const draft = setSetting(active, 'training.budget', 40)
@@ -17,6 +22,13 @@ describe('algorithm settings helpers', () => {
       .toEqual({ lower: 42, upper: 66 })
     expect(credibleBounds({ credible_lower_90: 40, credible_upper_90: 68 }))
       .toEqual({ lower: 40, upper: 68 })
+  })
+
+  it('non compone un intervallo usando limiti di coperture diverse', () => {
+    expect(credibleBounds({ credible_lower: 42, credible_upper: null, credible_lower_90: 40, credible_upper_90: 68 }))
+      .toEqual({ lower: 42, upper: null })
+    expect(credibleBounds({ credible_lower: null, credible_upper: null, credible_lower_90: 40, credible_upper_90: 68 }))
+      .toEqual({ lower: null, upper: null })
   })
 
   it('uses readable labels for context options', () => {

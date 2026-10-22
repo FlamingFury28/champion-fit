@@ -78,7 +78,9 @@ export interface ProfileSummaryDto {
 }
 
 export interface ProfileRecentMatchDto {
+  match_id?: string
   date: string
+  date_utc?: string | null
   account: string
   champion: string
   role: string
@@ -111,6 +113,7 @@ export interface ProfileWeekdayDto {
 }
 
 export interface RecommendationDto {
+  meaningful_delta?: number
   champion: string
   role: string
   score: number
@@ -152,6 +155,7 @@ export interface RecommendationEvidenceMatchDto {
   match_id: string
   account: string
   date: string
+  date_utc?: string | null
   champion: string
   role: string
   win: IntFlag
@@ -181,6 +185,7 @@ export interface RecommendationEvidenceResponseDto {
 }
 
 export interface ProfileResponseDto {
+  champion_options?: string[]
   accounts: string[]
   summary: ProfileSummaryDto
   recent: ProfileRecentMatchDto[]
@@ -268,6 +273,9 @@ export interface AvailableChampionDto {
 }
 
 export interface MatchupItemDto {
+  meaningful_delta?: number
+  decision_games?: number
+  unique_games?: number
   champion: string
   icon_url: string
   games: number
@@ -342,6 +350,7 @@ export interface ChampionStatsDto {
 
 export interface ChampionRecentMatchDto {
   date: string
+  date_utc?: string | null
   account: string
   role: string
   win: IntFlag
@@ -443,9 +452,9 @@ export interface AlgorithmSettingSchemaDto {
   label: string
   description: string
   type: 'number' | 'integer' | 'boolean' | 'select' | 'number[]' | 'string[]' | string
-  min?: number
-  max?: number
-  options?: Array<string | number | { label: string; value: string | number }>
+  min?: number | null
+  max?: number | null
+  options?: Array<string | number | { label: string; value: string | number }> | null
   group: string
 }
 
@@ -508,6 +517,7 @@ export interface TrainingPlanItemDto {
   rationale: string
 }
 export interface TrainingPlanResponseDto {
+  plan_fingerprint?: string
   budget_total: number
   budget_assigned: number
   budget_default: number
@@ -668,6 +678,12 @@ export interface RecommendationFeedbackItemDto {
   updated_at: string
 }
 
+export interface RecommendationFeedbackMutationResponseDto {
+  ok: true
+  revision: number
+  items: RecommendationFeedbackItemDto[]
+}
+
 export interface RecommendationFeedbackOptionDto {
   champion: string
   name: string
@@ -692,6 +708,7 @@ export interface MatchDto {
   account: string
   match_id: string
   date: string
+  date_utc?: string | null
   patch: string
   queue: string
   champion: string
@@ -718,7 +735,13 @@ export interface MatchDto {
   annotation_confidence: number
 }
 
-export interface MatchesResponseDto { items: MatchDto[] }
+export interface MatchesResponseDto {
+  items: MatchDto[]
+  total?: number
+  limit?: number
+  offset?: number
+  next_offset?: number | null
+}
 
 export interface AnnotationDto {
   match_id: string
@@ -784,7 +807,7 @@ export interface FriendDto {
   reliability: Reliability
 }
 
-export interface FriendGroupDto { id: number; name: string; aliases: string[] }
+export interface FriendGroupDto { id: number | string; name: string; aliases: string[] }
 
 export interface FriendsSummaryDto {
   tracked_accounts: number
@@ -802,7 +825,7 @@ export interface FriendsResponseDto {
 
 export interface FriendGroupCreateInput { name: string; aliases: string[] }
 export interface FriendGroupRenameInput { name: string }
-export interface FriendGroupMutationResponseDto { ok: true; id?: number; name?: string; added_aliases?: string[] }
+export interface FriendGroupMutationResponseDto { ok: true; id?: FriendGroupDto['id']; name?: string; added_aliases?: string[] }
 
 export interface SynergyItemDto {
   champion: string
@@ -824,6 +847,7 @@ export interface SynergyItemDto {
   direction_probability: number
   probability_meaningful_advantage: number
   probability_meaningful_disadvantage: number
+  meaningful_delta?: number
   effective_sample_size: number
   personal_effective_sample_size: number
   reliability: Reliability

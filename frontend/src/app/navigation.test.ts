@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { championHref, legacyDestination, sectionHref } from './navigation'
+import { championHref, legacyDestination, sectionHref, withoutChampionDetail } from './navigation'
 
 const url = (value: string) => new URL(value, 'http://localhost')
 
@@ -18,8 +18,38 @@ describe('canonical navigation', () => {
     expect(target.searchParams.get('detail')).toBe('Ahri')
   })
 
+  it('pins the resolved sheet context while preserving automatic list filters', () => {
+    const filters = new URLSearchParams('section=best&search=Ahri')
+    const target = url(championHref('Ahri', 'MIDDLE', filters, { queue: '420', days: 180 }))
+    expect(target.searchParams.get('detailQueue')).toBe('420')
+    expect(target.searchParams.get('detailDays')).toBe('180')
+    expect(target.searchParams.has('queue')).toBe(false)
+    expect(target.searchParams.has('days')).toBe(false)
+    expect(withoutChampionDetail(target.searchParams).toString()).toBe(filters.toString())
+    expect(filters.has('detail')).toBe(false)
+  })
+
+  it('retains explicit list filters and clears stale sheet context for a new link', () => {
+    const filters = new URLSearchParams('section=tournament&queue=440&days=90&detail=Lux&detailRole=TOP&detailQueue=420&detailDays=180')
+    const target = url(championHref('Ahri', 'MIDDLE', filters, { queue: '440', days: '90' }))
+    expect(target.searchParams.get('queue')).toBe('440')
+    expect(target.searchParams.get('days')).toBe('90')
+    expect(target.searchParams.get('detailQueue')).toBe('440')
+    expect(target.searchParams.get('detailDays')).toBe('90')
+    const list = withoutChampionDetail(target.searchParams)
+    expect(Object.fromEntries(list)).toEqual({ section: 'tournament', queue: '440', days: '90' })
+  })
+
+  it('does not invent a context when the response has no resolved fields', () => {
+    const target = url(championHref('Ahri', 'MIDDLE', new URLSearchParams('queue=440&days=90'), { queue: null, days: undefined }))
+    expect(target.searchParams.has('detailQueue')).toBe(false)
+    expect(target.searchParams.has('detailDays')).toBe(false)
+    expect(target.searchParams.get('queue')).toBe('440')
+    expect(target.searchParams.get('days')).toBe('90')
+  })
+
   it('switches a section without carrying an open sheet or erasing filters', () => {
-    const target = url(sectionHref('/app/fit', 'training', new URLSearchParams('section=choices&role=MIDDLE&n=100&detail=Ahri&detailRole=TOP')))
+    const target = url(sectionHref('/app/fit', 'training', new URLSearchParams('section=choices&role=MIDDLE&n=100&detail=Ahri&detailRole=TOP&detailQueue=420&detailDays=180')))
     expect(Object.fromEntries(target.searchParams)).toEqual({ section: 'training', role: 'MIDDLE', n: '100' })
   })
 

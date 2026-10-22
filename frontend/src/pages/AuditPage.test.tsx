@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, useLocation } from 'react-router'
+import { createMemoryRouter, RouterProvider, useLocation } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { queryKeys } from '../api/queries'
 import { AuditPage } from './AuditPage'
@@ -14,7 +14,8 @@ function LocationProbe() { return <output data-testid="location">{useLocation().
 function renderPage(embedded: boolean, url: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
   client.setQueryData(queryKeys.matches(context.scope, embedded ? 'all' : 'contaminated'), { items: [] })
-  return render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[url]}><AuditPage embedded={embedded} /><LocationProbe /></MemoryRouter></QueryClientProvider>)
+  const router = createMemoryRouter([{ path: '*', element: <><AuditPage embedded={embedded} /><LocationProbe /></> }], { initialEntries: [url] })
+  return render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>)
 }
 
 afterEach(cleanup)

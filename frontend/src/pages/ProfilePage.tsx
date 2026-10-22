@@ -10,7 +10,7 @@ type ConfirmProfileAction =
 
 export function ProfilePage() {
   const {
-    state, scope, availableAccounts, setAccounts,
+    state, scope, availableAccounts, setAccounts, storageAvailable,
     saveProfile, deleteProfile, setCompanion, clearCompanion,
   } = useScope()
   const [profileName, setProfileName] = useState('')
@@ -31,7 +31,7 @@ export function ProfilePage() {
     const result = setAccounts(accounts)
     notifyCompanionCleared(result.companionCleared)
     if (result.missing.length) {
-      const applied = result.accounts.length
+      const applied = result.appliedAccounts.length
       notify(applied ? 'Profilo applicato parzialmente' : 'Profilo non applicato', {
         description: applied
           ? `${applied} ${applied === 1 ? 'account disponibile' : 'account disponibili'} applicati. Non più disponibili: ${result.missing.join(' · ')}.`
@@ -42,9 +42,18 @@ export function ProfilePage() {
   }
 
   const persistProfile = (name: string) => {
-    saveProfile(name)
+    const result = saveProfile(name)
+    if (!result.applied) {
+      notify('Profilo non salvato', { description: 'Scegli almeno un account e un nome per il profilo.', tone: 'error' })
+      return
+    }
     setProfileName('')
-    notify('Profilo salvato', { description: `${name} conserva ${scope.accounts.length} account.`, tone: 'success' })
+    notify(result.persisted ? 'Profilo salvato' : 'Profilo disponibile per questa sessione', {
+      description: result.persisted
+        ? `${result.name} conserva ${scope.accounts.length} account.`
+        : `${result.name} resta attivo ora, ma il browser non consente il salvataggio. Dopo la chiusura potrebbe non essere disponibile.`,
+      tone: result.persisted ? 'success' : 'info',
+    })
   }
 
   const submitProfile = (event: FormEvent) => {
@@ -68,22 +77,24 @@ export function ProfilePage() {
     setConfirmAction(null)
   }
 
+  const companionProfiles = Object.entries(state.profiles).map(([name, accounts]) => ({
+    name,
+    accounts: accounts.filter((account) => availableAccounts.some((item) => item.account === account) && !scope.accounts.includes(account)),
+  })).filter(({ accounts }) => accounts.length)
+  const effectiveCompanionName = companionProfiles.some(({ name }) => name === companionName) ? companionName : ''
+
   const applyCompanion = () => {
-    const accounts = state.profiles[companionName]
+    if (!effectiveCompanionName) return
+    const accounts = state.profiles[effectiveCompanionName]
     if (!accounts?.length) return
-    const result = setCompanion({ name: companionName, accounts, mode: companionMode })
+    const result = setCompanion({ name: effectiveCompanionName, accounts, mode: companionMode })
     if (!result.accounts.length) {
       notify('Filtro sui compagni non applicato', { description: 'Il profilo non contiene account disponibili fuori dalla selezione attiva.', tone: 'info' })
       return
     }
     const unavailable = result.missing.length ? ` Account non disponibili esclusi: ${result.missing.join(' · ')}.` : ''
-    notify('Filtro sui compagni aggiornato', { description: `${companionMode === 'exclude' ? 'Esclusione' : 'Presenza esclusiva'} · ${companionName} · ${result.accounts.length} ${result.accounts.length === 1 ? 'account applicato' : 'account applicati'}.${unavailable}`, tone: result.missing.length ? 'info' : 'success' })
+    notify('Filtro sui compagni aggiornato', { description: `${companionMode === 'exclude' ? 'Esclusione' : 'Presenza esclusiva'} · ${effectiveCompanionName} · ${result.accounts.length} ${result.accounts.length === 1 ? 'account applicato' : 'account applicati'}.${unavailable}`, tone: result.missing.length ? 'info' : 'success' })
   }
-
-  const companionProfiles = Object.entries(state.profiles).map(([name, accounts]) => ({
-    name,
-    accounts: accounts.filter((account) => availableAccounts.some((item) => item.account === account) && !scope.accounts.includes(account)),
-  })).filter(({ accounts }) => accounts.length)
 
   return (
     <div className="page-stack">
@@ -96,7 +107,7 @@ export function ProfilePage() {
 
       <div className="profile-settings-grid">
         <Surface className="account-summary">
-          <div className="section-heading"><div><p className="eyebrow"><UserRound aria-hidden="true" /> Account</p><h2>Selezione attiva</h2></div><span>salvataggio automatico</span></div>
+          <div className="section-heading"><div><p className="eyebrow"><UserRound aria-hidden="true" /> Account</p><h2>Selezione attiva</h2></div><span>{storageAvailable ? 'salvataggio automatico' : 'valido per questa sessione'}</span></div>
           <div className="selected-account-list">
             {availableAccounts.map((account) => {
               const active = scope.accounts.includes(account.account)
@@ -143,7 +154,7 @@ export function ProfilePage() {
           <div className="section-heading"><div><p className="eyebrow"><UsersRound aria-hidden="true" /> Compagni</p><h2>Filtro di presenza</h2></div></div>
           <p className="section-copy">Scegli un profilo salvato per escludere le partite condivise oppure usare soltanto quelle giocate insieme.</p>
           <label>Profilo dei compagni
-            <select value={companionName} onChange={(event) => setCompanionName(event.target.value)}>
+            <select value={effectiveCompanionName} onChange={(event) => setCompanionName(event.target.value)}>
               <option value="">Scegli un profilo</option>
               {companionProfiles.map(({ name, accounts }) => (
                 <option key={name} value={name}>{name} · {accounts.length} {accounts.length === 1 ? 'account applicabile' : 'account applicabili'}</option>
@@ -154,7 +165,7 @@ export function ProfilePage() {
             <button type="button" aria-pressed={companionMode === 'exclude'} onClick={() => setCompanionMode('exclude')}>Escludi</button>
             <button type="button" aria-pressed={companionMode === 'only'} onClick={() => setCompanionMode('only')}>Solo insieme</button>
           </div>
-          <button className="button" type="button" disabled={!companionName} onClick={applyCompanion}>Applica filtro</button>
+          <button className="button" type="button" disabled={!effectiveCompanionName} onClick={applyCompanion}>Applica filtro</button>
           {state.companion ? (
             <div className="active-companion">
               <StatusBadge tone="warning">{state.companion.mode === 'exclude' ? 'Escludi' : 'Solo'} · {state.companion.name} · {state.companion.accounts.length} {state.companion.accounts.length === 1 ? 'account' : 'account'}</StatusBadge>

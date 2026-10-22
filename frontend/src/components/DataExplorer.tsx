@@ -17,6 +17,7 @@ export interface DataVisualItem {
   sampleLabel?: string
   low?: number | null
   high?: number | null
+  intervalLabel?: string
   reference?: number | null
   tone?: 'positive' | 'warning' | 'negative' | 'info' | 'neutral'
   details?: ReactNode
@@ -60,7 +61,9 @@ export function dataDomain(items: readonly DataVisualItem[], fixed?: readonly [n
   let min = 0, max = 0
   for (const item of items) {
     if (!finite(item.value)) continue
-    for (const value of [item.value, item.low, item.high, item.reference]) {
+    const values = [item.value, item.reference]
+    if (finite(item.low) && finite(item.high) && item.low <= item.high) values.push(item.low, item.high)
+    for (const value of values) {
       if (finite(value)) { min = Math.min(min, value); max = Math.max(max, value) }
     }
   }
@@ -79,7 +82,7 @@ function ItemCard({ item, metricLabel, valueSuffix = '', sampleLabel = 'partite'
     <div className="data-explorer__card-value"><strong>{finite(item.value) ? item.valueLabel ?? `${number(item.value)}${valueSuffix}` : 'Non disponibile'}</strong><span>{metricLabel}</span></div>
     <dl className="data-explorer__facts">
       {finite(item.sample) ? <div><dt>{item.sampleLabel ?? sampleLabel}</dt><dd>{number(item.sample)}</dd></div> : null}
-      {finite(item.low) && finite(item.high) && item.low <= item.high ? <div><dt>Intervallo {credibleMassLabel(credibleMass)}</dt><dd>{number(item.low)}–{number(item.high)}{valueSuffix}</dd></div> : null}
+      {finite(item.low) && finite(item.high) && item.low <= item.high ? <div><dt>{item.intervalLabel ?? `Intervallo ${credibleMassLabel(credibleMass)}`}</dt><dd>{number(item.low)}–{number(item.high)}{valueSuffix}</dd></div> : null}
       {finite(item.reference) ? <div><dt>Riferimento</dt><dd>{number(item.reference)}{valueSuffix}</dd></div> : null}
     </dl>
     {item.details ? <div className="data-explorer__details">{item.details}</div> : null}
@@ -102,20 +105,24 @@ function Explorer({ id, label, items, children, metricLabel, valueDomain, valueS
   const chart = useMemo(() => {
     if (activeView !== 'bars' && activeView !== 'scatter') return undefined
     const plotItems: DataVisualItem[] = []
+    const intervalLabels = new Set<string>()
     let hasInterval = false, hasReference = false, maxSample = 0
     for (const item of items) {
       if (!finite(item.value)) continue
       if (activeView === 'bars') {
         hasInterval ||= finite(item.low) && finite(item.high) && item.low <= item.high
+        if (finite(item.low) && finite(item.high) && item.low <= item.high) {
+          intervalLabels.add(item.intervalLabel ?? `Intervallo ${credibleMassLabel(credibleMass)}`)
+        }
         hasReference ||= finite(item.reference)
       } else if (finite(item.sample) && item.sample >= 0) {
         plotItems.push(item)
         maxSample = Math.max(maxSample, item.sample)
       }
     }
-    return { domain: dataDomain(items, valueDomain), plotItems, sampleDomain: roundedDomain(0, maxSample), hasInterval, hasReference }
-  }, [items, valueDomain, activeView])
-  const { domain = emptyDomain, plotItems = emptyItems, sampleDomain = emptyDomain, hasInterval = false, hasReference = false } = chart ?? {}
+    return { domain: dataDomain(items, valueDomain), plotItems, sampleDomain: roundedDomain(0, maxSample), hasInterval, hasReference, intervalLabels: [...intervalLabels] }
+  }, [items, valueDomain, activeView, credibleMass])
+  const { domain = emptyDomain, plotItems = emptyItems, sampleDomain = emptyDomain, hasInterval = false, hasReference = false, intervalLabels = [] } = chart ?? {}
   const currentItems = activeView === 'scatter' ? plotItems : items
   const selected = chart ? currentItems.find((item) => item.id === selectedId) ?? currentItems[0] : undefined
   const displayValue = (item: DataVisualItem) => finite(item.value) ? item.valueLabel ?? `${number(item.value)}${valueSuffix}` : 'Non disponibile'
@@ -151,7 +158,7 @@ function Explorer({ id, label, items, children, metricLabel, valueDomain, valueS
               </button>
             })}
           </div>
-          {hasInterval || hasReference ? <p className="data-explorer__legend">{hasInterval ? <span><i className="data-explorer__legend-interval" aria-hidden="true" />Tratto sottile: intervallo {credibleMassLabel(credibleMass)}</span> : null}{hasReference ? <span><i className="data-explorer__legend-reference" aria-hidden="true" />Tratteggio: riferimento</span> : null}</p> : null}
+          {hasInterval || hasReference ? <p className="data-explorer__legend">{hasInterval ? <span><i className="data-explorer__legend-interval" aria-hidden="true" />Tratto sottile: {intervalLabels.join(' · ')}</span> : null}{hasReference ? <span><i className="data-explorer__legend-reference" aria-hidden="true" />Tratteggio: riferimento</span> : null}</p> : null}
         </> : plotItems.length ? <>
           <figure className="data-explorer__scatter">
             <div className="data-explorer__y-title">{metricLabel}{valueSuffix ? ` (${valueSuffix.trim()})` : ''}</div>

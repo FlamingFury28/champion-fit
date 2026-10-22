@@ -1,10 +1,16 @@
 import { useEffect, useState } from 'react'
+import { stripPythonWhitespace } from './python-text'
 
 export const ROLES = ['ALL', 'TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'SUPPORT'] as const
 
+export function canonicalRole(value: string | null): string {
+  const normalized = stripPythonWhitespace(value ?? '').toUpperCase()
+  return normalized === 'UTILITY' ? 'SUPPORT' : normalized
+}
+
 export function normalizeRole(value: string | null): string {
-  const normalized = value?.toUpperCase() === 'UTILITY' ? 'SUPPORT' : value?.toUpperCase()
-  return ROLES.includes(normalized as typeof ROLES[number]) ? normalized! : 'ALL'
+  const normalized = canonicalRole(value)
+  return ROLES.includes(normalized as typeof ROLES[number]) ? normalized : 'ALL'
 }
 
 export function clampInteger(value: string | null, minimum: number, maximum: number, fallback: number) {
@@ -22,10 +28,10 @@ export function useDebouncedValue<T>(value: T, delay = 180) {
   return debounced
 }
 
-export function formatDate(value: string | null | undefined) {
+export function formatDate(value: string | null | undefined, options?: { timeZone: 'UTC' }) {
   if (!value) return '—'
   const parsed = new Date(value)
-  return Number.isNaN(parsed.valueOf()) ? value : parsed.toLocaleDateString('it-IT')
+  return Number.isNaN(parsed.valueOf()) ? value : parsed.toLocaleDateString('it-IT', options)
 }
 
 export function pct(value: number | null | undefined, digits = 1) {

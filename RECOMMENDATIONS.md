@@ -24,6 +24,8 @@ La risposta contiene cinque componenti concettualmente diverse:
 
 Quando il ruolo è omesso o vale `ALL`, `known` e `discover` contengono voci distinte per coppia champion×ruolo; le statistiche e il feedback restano specifici per ruolo e il limite configurato continua ad applicarsi all’intera lista. Le richieste di dettaglio senza ruolo espongono le varianti disponibili in `candidates`; il campo singolo `candidate` resta associato alle richieste con ruolo concreto.
 
+Il filtro delle raccomandazioni accetta anche gli alias `MID` → `MIDDLE`, `ADC` → `BOTTOM` e `UTILITY` → `SUPPORT`, senza distinzione tra maiuscole e minuscole. `AUTO` resta distinto da un ruolo omesso: seleziona il ruolo più osservato nel contesto.
+
 Con `ALL`, la quota di una scelta familiare usa come denominatore tutte le scelte ammesse dell’account nel contesto, attraverso i ruoli. Per esempio, quattro Ahri centrale, una Lux centrale e una Riven superiore producono quote 4/6, 1/6 e 1/6: una partita nel ruolo secondario non riceve artificialmente quota 100%. Le quote degli account attivi sono mediate con peso uguale. Con un ruolo concreto il denominatore è invece specifico per quel ruolo. I like restano prioritari senza aggiungere partite.
 
 Per le scoperte aggregate tra ruoli, `similarity` conserva la somiglianza tassonomica grezza. Il campo distinto `priority_score` pesa l’affinità implicita per la quota di scelte dell’account in quel ruolo, poi media con peso uguale tra account del contesto. Le preferenze esplicite possono guidare un ruolo senza esposizione precedente e non vengono ridotte a una frequenza inventata. L’ordine usa questa priorità, poi similarità, nome e identificativo stabile. Nessuno dei due valori è una probabilità di vittoria o gradimento.
@@ -35,6 +37,10 @@ Per ciascun account, le scelte esplicitamente sgradite escono anche dalle sorgen
 La copertura distingue partite uniche (`games`), osservazioni account-partita complete (`observations`) e osservazioni della finestra delle preferenze (`preference_observations`). Sommare vittorie fra account che hanno partecipato alla stessa partita non aumenta il numero di partite uniche.
 
 ## Contesto e pochi dati
+
+Passando dai suggerimenti a rendimento, piano competitivo o confronti con avversari e alleati, un ruolo o una coda automatici vengono sostituiti nei collegamenti da entrambi i valori effettivi della risposta corrente. Questo vale anche per la coda automatica configurata come predefinita. I collegamenti attendono una risposta aggiornata per gli account, i compagni e la revisione selezionati; non riutilizzano il contesto durante caricamenti, errori o invalidazioni. I passaggi fra le liste di suggerimenti conservano invece l’automatismo. I link aperti direttamente nelle analisi mantengono la propria validazione.
+
+Aprendo una scheda da Scelte, Da scoprire o Piano di prove, il collegamento conserva la coda effettiva della risposta e usa il ruolo della carta. Il periodo eredita il parametro del link o la configurazione corrente, anche quando questa seleziona le ultime N partite. La chiusura della scheda conserva i filtri originali della lista.
 
 I default sono tutto lo storico (`period.value=0`), il contesto di code previsto dalle impostazioni, tutti i ruoli senza filtro, sei elementi complessivi per sezione e budget di prova tre. Un periodo positivo seleziona gli ultimi N giorni oppure le ultime N partite per account (`period.unit`). Per le ultime N partite si applicano prima ruolo, coda e filtro compagni: partite recenti estranee al contesto non nascondono quelle pertinenti. La coda automatica continua a usare la coppia coda×ruolo più osservata nel perimetro corrente; quando il ruolo è `ALL`, vengono considerate tutte le partite della coda scelta. `role=AUTO` conserva la selezione storica del ruolo più osservato per compatibilità. Una coda o un ruolo concreto espliciti restano invariati anche senza dati.
 

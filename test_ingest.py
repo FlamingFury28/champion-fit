@@ -2,6 +2,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
@@ -246,6 +247,52 @@ class IngestTests(unittest.TestCase):
             self.assertEqual(metadata["last_sync_source"], "test-exporter")
             self.assertEqual(metadata["last_sync_inserted"], "0")
             connection.close()
+
+    def test_snapshot_numeric_boolean_flags_preserve_outcomes_and_are_idempotent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            snapshot = root / "snapshot.json"
+            database = root / "test.db"
+            rows = [
+                {
+                    "account": "TestAccount#EUW", "match_id": f"NUMERIC_{index}",
+                    "date": "2026-08-21T00:00:00Z", "patch": "16.16",
+                    "queue": "Ranked Solo/Duo", "champion": "Vi", "role": "JUNGLE",
+                    "duration_minutes": 28.4, "win": value,
+                    "explicit_afk": value, "suspected_quasi_afk": value,
+                    "early_surrender": value,
+                }
+                for index, value in enumerate((0, 1, 0.0, 1.0))
+            ]
+            snapshot.write_text(json.dumps({"matches": rows}), encoding="utf-8")
+
+            self.assertEqual(ingest(snapshot, database)["inserted"], 4)
+            with closing(sqlite3.connect(database)) as connection:
+                stored = connection.execute(
+                    "SELECT win,explicit_afk,suspected_quasi_afk,early_surrender,"
+                    "win_evidence_weight,loss_attribution_weight "
+                    "FROM match_quality ORDER BY match_id"
+                ).fetchall()
+                self.assertEqual(stored, [
+                    (0, 0, 0, 0, 0.0, 0.88),
+                    (1, 1, 1, 1, 0.95, 0.0),
+                    (0, 0, 0, 0, 0.0, 0.88),
+                    (1, 1, 1, 1, 0.95, 0.0),
+                ])
+                provenance = [json.loads(row[0]) for row in connection.execute(
+                    "SELECT overrides_json FROM match_import_provenance ORDER BY match_id"
+                )]
+                self.assertEqual(provenance, [
+                    {field: row[field] for field in (
+                        "explicit_afk", "suspected_quasi_afk", "early_surrender",
+                    )}
+                    for row in rows
+                ])
+
+            repeated = ingest(snapshot, database)
+            self.assertEqual(repeated["inserted"], 0)
+            self.assertEqual(repeated["updated"], 0)
+            self.assertEqual(repeated["skipped"], 4)
 
     def test_incomplete_or_malformed_snapshot_cannot_overwrite_match_or_provenance(self):
         with tempfile.TemporaryDirectory() as directory:

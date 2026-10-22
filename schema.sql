@@ -5,6 +5,39 @@ CREATE TABLE IF NOT EXISTS source_metadata (
     value TEXT NOT NULL
 );
 
+-- Durable synchronization outcomes are independent of display-name ownership.
+-- UUID run keys merge safely from SQLite staging into PostgreSQL.
+CREATE TABLE IF NOT EXISTS riot_sync_runs (
+    run_id TEXT PRIMARY KEY,
+    operation TEXT NOT NULL CHECK (operation IN ('historical', 'incremental', 'reprocess')),
+    status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'partial', 'failed', 'interrupted')),
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    pid INTEGER NOT NULL,
+    requested_accounts INTEGER NOT NULL,
+    completed_accounts INTEGER NOT NULL DEFAULT 0,
+    partial_accounts INTEGER NOT NULL DEFAULT 0,
+    failed_accounts INTEGER NOT NULL DEFAULT 0,
+    interrupted_accounts INTEGER NOT NULL DEFAULT 0,
+    counts_json TEXT NOT NULL DEFAULT '{}',
+    error_code TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS riot_sync_run_accounts (
+    run_id TEXT NOT NULL,
+    requested_account TEXT NOT NULL,
+    resolved_account TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'completed', 'partial', 'failed', 'interrupted')),
+    started_at TEXT,
+    finished_at TEXT,
+    counts_json TEXT NOT NULL DEFAULT '{}',
+    error_code TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (run_id, requested_account),
+    FOREIGN KEY (run_id) REFERENCES riot_sync_runs(run_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_riot_sync_runs_started ON riot_sync_runs(started_at DESC, run_id);
+
 -- Stable ownership survives Riot ID changes; display names remain API-compatible.
 CREATE TABLE IF NOT EXISTS riot_account_identities (
     identity_id TEXT PRIMARY KEY,
@@ -266,7 +299,7 @@ CREATE TABLE IF NOT EXISTS friend_groups (
 );
 
 CREATE TABLE IF NOT EXISTS friend_group_aliases (
-    group_id INTEGER NOT NULL,
+    group_id BIGINT NOT NULL,
     alias TEXT NOT NULL UNIQUE,
     PRIMARY KEY (group_id, alias),
     FOREIGN KEY (group_id) REFERENCES friend_groups(id) ON DELETE CASCADE
@@ -323,3 +356,10 @@ CREATE TABLE IF NOT EXISTS recommendation_feedback_events (
 INSERT INTO recommendation_feedback_state(singleton_id, revision)
 VALUES(1, 0)
 ON CONFLICT(singleton_id) DO NOTHING;
+
+-- Chosen allocations are immutable; progress is derived from imported matches.
+CREATE TABLE IF NOT EXISTS training_plan_runs (
+    id TEXT PRIMARY KEY,
+    started_at TEXT NOT NULL,
+    snapshot_json TEXT NOT NULL
+);

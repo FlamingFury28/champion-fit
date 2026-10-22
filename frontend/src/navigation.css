@@ -25,7 +25,7 @@
 .site-map-card > svg { width: 17px; height: 17px; color: var(--accent); }
 .site-map-empty { margin: 0; padding: 24px; border: 1px dashed var(--border); border-radius: var(--radius-panel); color: var(--text-soft); text-align: center; }
 .section-navigation { padding: .45rem; border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--surface); }
-.section-navigation a, .context-navigation :is(a, button) { min-height: 44px; position: relative; display: inline-flex; align-items: center; padding: .65rem 1.1rem; border: 0; border-radius: var(--radius-control); text-decoration: none; color: var(--text-soft); background: transparent; font: inherit; font-weight: 650; cursor: pointer; }
+.section-navigation :is(a, [role="link"]), .context-navigation :is(a, button) { min-height: 44px; position: relative; display: inline-flex; align-items: center; padding: .65rem 1.1rem; border: 0; border-radius: var(--radius-control); text-decoration: none; color: var(--text-soft); background: transparent; font: inherit; font-weight: 650; cursor: pointer; }
 .section-navigation a[aria-current], .context-navigation :is(a, button)[aria-current] { color: var(--text); background: var(--accent-soft); box-shadow: inset 0 -2px var(--accent); }
 .section-navigation a[aria-current]::after, .context-navigation :is(a, button)[aria-current]::after { content: ''; position: absolute; right: .75rem; bottom: -2px; width: 5px; height: 5px; border-radius: 50%; background: var(--brand-amber); }
 .section-navigation a:hover, .context-navigation :is(a, button):hover { color: var(--text); background: var(--accent-soft); }
@@ -34,7 +34,8 @@
 .hub-secondary > summary span { color: var(--muted); font-size: 11px; font-weight: 500; }
 .hub-secondary__label { margin: .35rem 1rem .5rem; color: var(--muted); font-size: 12px; }
 .hub-secondary__links { display: flex; flex-wrap: wrap; gap: .4rem; padding: 0 .5rem .5rem; }
-.hub-secondary__links a { min-height: 40px; display: inline-flex; align-items: center; padding: .55rem .85rem; border-radius: var(--radius-control); color: var(--text-soft); text-decoration: none; font-size: 12px; font-weight: 600; }
+.hub-secondary__links :is(a, [role="link"]) { min-height: 40px; display: inline-flex; align-items: center; padding: .55rem .85rem; border-radius: var(--radius-control); color: var(--text-soft); text-decoration: none; font-size: 12px; font-weight: 600; }
+.section-navigation [aria-disabled="true"], .hub-secondary__links [aria-disabled="true"] { opacity: .6; cursor: default; }
 .hub-secondary__links a[aria-current], .hub-secondary__links a:hover { color: var(--text); background: var(--accent-soft); }
 .workspace-hub > .page-stack > .page-header h2 { font-size: clamp(1.5rem, 2.2vw, 2.15rem); }
 .page-header h2 { margin: 0; font-family: var(--font-display); line-height: 1.2; }
@@ -81,9 +82,9 @@
   .site-map-search-row > label { width: 100%; }
   .site-map-search-row > p { margin: 0; text-align: left; }
   .section-navigation { display: grid; grid-template-columns: 1fr; }
-  .section-navigation a { justify-content: flex-start; }
+  .section-navigation :is(a, [role="link"]) { justify-content: flex-start; }
   .hub-secondary__links { display: grid; grid-template-columns: 1fr; }
-  .hub-secondary__links a { justify-content: flex-start; }
+  .hub-secondary__links :is(a, [role="link"]) { justify-content: flex-start; }
   .drawer-content--wide { width: 100vw; inset: 0; border-radius: 0; padding: 1rem; }
   .drawer-content--wide .metric-grid { grid-template-columns: 1fr; }
   .champion-choices .recommendation-card__heading { grid-template-columns: 18px 38px minmax(0, 1fr) auto; }

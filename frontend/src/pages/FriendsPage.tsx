@@ -1,15 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowDown, ArrowUp, Pencil, Plus, Trash2, UsersRound, X } from 'lucide-react'
-import { useMemo, useState, type FormEvent } from 'react'
+import { useMemo, useRef, useState, type FormEvent } from 'react'
 import { useSearchParams } from 'react-router'
-import { deleteJson, patchJson, postJson } from '../api/client'
+import { saveFriendGroup } from '../api/mutations'
 import { invalidateAfterFriendGroup } from '../api/invalidation'
 import { friendsQuery } from '../api/queries'
-import type { FriendDto, FriendGroupDto, FriendGroupMutationResponseDto } from '../api/types'
-import { clampInteger, formatDate, pct } from '../app/filters'
+import type { FriendDto, FriendGroupDto } from '../api/types'
+import { canonicalRole, clampInteger, formatDate, pct, ROLES } from '../app/filters'
+import { normalizeDateFilter } from '../app/iso-calendar'
+import { canonicalQueueFilter } from '../app/queue-filter'
 import { credibleBounds, credibleMassLabel, getSetting, useAlgorithmSettings } from '../app/algorithm-settings'
 import { apiErrorLabel, queueLabel, roleLabel } from '../app/labels'
-import { reliabilityLabel, resolvedReliability } from '../app/reliability'
+import { evidenceThresholds, reliabilityLabel, resolvedReliability } from '../app/reliability'
 import { useScope } from '../app/scope'
 import { DataExplorer, type DataVisualItem } from '../components/DataExplorer'
 import { useToast } from '../components/toast'
@@ -20,10 +22,12 @@ type SortDirection = 'asc' | 'desc'
 type SortItem = [SortField, SortDirection]
 type GroupAction =
   | { kind: 'create'; name: string; aliases: string[] }
-  | { kind: 'add-aliases'; id: number; groupName: string; aliases: string[] }
-  | { kind: 'rename'; id: number; name: string }
-  | { kind: 'delete-group'; id: number }
-  | { kind: 'delete-alias'; id: number; alias: string }
+  | { kind: 'add-aliases'; id: FriendGroupDto['id']; groupName: string; aliases: string[] }
+  | { kind: 'rename'; id: FriendGroupDto['id']; name: string }
+  | { kind: 'delete-group'; id: FriendGroupDto['id'] }
+  | { kind: 'delete-alias'; id: FriendGroupDto['id']; alias: string }
+
+interface GroupRequest { action: GroupAction; session: number }
 
 function parseSort(value: string | null): SortItem[] {
   const items = (value ?? 'games:desc').split(',').map((item) => item.split(':'))
@@ -42,12 +46,13 @@ export function friendsMinimumGamesFromSettings(value: unknown) {
 }
 
 export function friendsFiltersFromParams(params: URLSearchParams, configuredMinimumGames: number) {
+  const rawRole = params.get('role')
   return {
-    role: params.get('role') ?? 'ALL',
-    queue: params.get('queue') ?? 'all',
+    role: canonicalRole(rawRole) || rawRole || 'ALL',
+    queue: canonicalQueueFilter(params.get('queue')) || 'all',
     friend_q: params.get('name') ?? '',
-    games_from: params.get('games_from') ?? '',
-    last_game_from: params.get('last_game_from') ?? '',
+    games_from: normalizeDateFilter(params.get('games_from')),
+    last_game_from: normalizeDateFilter(params.get('last_game_from')),
     min_shared_games: clampInteger(params.get('min_games'), 1, 10_000, configuredMinimumGames),
     sort: parseSort(params.get('sort')).map(([field, direction]) => `${field}:${direction}`).join(','),
   }
@@ -111,6 +116,7 @@ function friendSignal(friend: FriendDto, minimumGames: number, meaningfulDelta: 
 
 export function FriendsPage() {
   const { credibleMass, settings, isPending: settingsPending } = useAlgorithmSettings()
+  const thresholds = evidenceThresholds(settings)
   const { scope, scopeReady } = useScope()
   const [params, setParams] = useSearchParams()
   const configuredMinimumGames = friendsMinimumGamesFromSettings(getSetting(settings, 'friends.min_shared_games'))
@@ -119,6 +125,9 @@ export function FriendsPage() {
   const configuredDelta = Number(getSetting(settings, 'evidence.meaningful_delta'))
   const meaningfulDelta = Number.isFinite(configuredDelta) && configuredDelta >= 0 ? configuredDelta : 0.03
   const filters = useMemo(() => friendsFiltersFromParams(params, configuredMinimumGames), [configuredMinimumGames, params])
+  const roleKnown = ROLES.includes(filters.role as typeof ROLES[number])
+  const roleCaption = roleKnown ? roleLabel(filters.role) : canonicalRole(filters.role) ? 'non valido' : 'automatico'
+  const queueKnown = ['all', '400', '420', '430', '440', '450', '480', '490', '700'].includes(filters.queue)
   const [minimumGames, setMinimumGames] = useState({
     value: filters.min_shared_games,
     draft: String(filters.min_shared_games),
@@ -139,16 +148,17 @@ export function FriendsPage() {
   const [renameGroup, setRenameGroup] = useState<FriendGroupDto | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [confirmAction, setConfirmAction] = useState<GroupAction | null>(null)
+  const [dialogSession, setDialogSession] = useState(0)
+  const dialogSessionRef = useRef(0)
+  const changeDialog = (change: () => void) => {
+    dialogSessionRef.current += 1
+    setDialogSession(dialogSessionRef.current)
+    change()
+  }
 
   const groupMutation = useMutation({
-    mutationFn: async (action: GroupAction) => {
-      if (action.kind === 'create') return postJson<FriendGroupMutationResponseDto>('/api/friend-groups', { name: action.name, aliases: action.aliases })
-      if (action.kind === 'add-aliases') return postJson<FriendGroupMutationResponseDto>(`/api/friend-groups/${action.id}/aliases`, { aliases: action.aliases })
-      if (action.kind === 'rename') return patchJson<FriendGroupMutationResponseDto>(`/api/friend-groups/${action.id}`, { name: action.name })
-      if (action.kind === 'delete-alias') return deleteJson<FriendGroupMutationResponseDto>(`/api/friend-groups/${action.id}/aliases/${encodeURIComponent(action.alias)}`)
-      return deleteJson<FriendGroupMutationResponseDto>(`/api/friend-groups/${action.id}`)
-    },
-    onSuccess: async (result, action) => {
+    mutationFn: ({ action }: GroupRequest) => saveFriendGroup(action),
+    onSuccess: async (result, { action, session }) => {
       await invalidateAfterFriendGroup(queryClient)
       const title = action.kind === 'create' ? 'Gruppo creato'
         : action.kind === 'add-aliases' ? result.added_aliases?.length ? 'Persone aggiunte' : 'Nessun Riot ID nuovo'
@@ -160,10 +170,25 @@ export function FriendsPage() {
           : 'I Riot ID inseriti erano già presenti nel gruppo.'
         : undefined
       notify(title, { description, tone: 'success' })
-      setCreateOpen(false); setAddAliasesGroup(null); setAddAliasesValue(''); setRenameGroup(null); setConfirmAction(null); setGroupName(''); setAliases('')
+      if (session !== dialogSessionRef.current) return
+      changeDialog(() => {
+        if (action.kind === 'create') {
+          setCreateOpen(false); setGroupName(''); setAliases('')
+        } else if (action.kind === 'add-aliases') {
+          setAddAliasesGroup(null); setAddAliasesValue('')
+        } else if (action.kind === 'rename') {
+          setRenameGroup(null); setRenameValue('')
+        } else setConfirmAction(null)
+      })
     },
     onError: (error) => notify('Modifica non riuscita', { description: apiErrorLabel(error.message), tone: 'error' }),
   })
+  const operationPending = groupMutation.isPending && groupMutation.variables?.session === dialogSession
+  const operationError = groupMutation.isError && groupMutation.variables?.session === dialogSession
+  const submitGroupAction = (action: GroupAction) => {
+    if (operationPending) return
+    groupMutation.mutate({ action, session: dialogSessionRef.current })
+  }
 
   const update = (key: string, value: string, fallback = '') => setParams((current) => {
     const next = new URLSearchParams(current)
@@ -197,7 +222,7 @@ export function FriendsPage() {
     event.preventDefault()
     const values = aliases.split(',').map((value) => value.trim()).filter(Boolean)
     if (!groupName.trim() || !values.length) return
-    groupMutation.mutate({ kind: 'create', name: groupName.trim(), aliases: values })
+    submitGroupAction({ kind: 'create', name: groupName.trim(), aliases: values })
   }
 
   const submitAddAliases = (event: FormEvent) => {
@@ -211,7 +236,7 @@ export function FriendsPage() {
       return true
     })
     if (!values.length) return
-    groupMutation.mutate({ kind: 'add-aliases', id: addAliasesGroup.id, groupName: addAliasesGroup.name, aliases: values })
+    submitGroupAction({ kind: 'add-aliases', id: addAliasesGroup.id, groupName: addAliasesGroup.name, aliases: values })
   }
 
   const sort = parseSort(params.get('sort'))
@@ -224,11 +249,12 @@ export function FriendsPage() {
     return {
       id: friend.friend_key,
       label: friend.friend,
-      subtitle: `${signal.label} · ${friend.accounts_played_with} account selezionati · ultima partita ${formatDate(friend.last_game)}`,
+      subtitle: `${signal.label} · ${friend.accounts_played_with} account selezionati · ultima partita ${formatDate(friend.last_game, { timeZone: 'UTC' })}`,
       value: friend.posterior_win_rate,
       valueLabel: pct(friend.posterior_win_rate, 1),
       low: credibleBounds(friend).lower,
       high: credibleBounds(friend).upper,
+      intervalLabel: `Intervallo ${credibleMassLabel(friend.credible_mass ?? credibleMass)}`,
       reference: friend.baseline_win_rate,
       sample: friend.shared_games,
       sampleLabel: 'Partite condivise',
@@ -236,14 +262,14 @@ export function FriendsPage() {
       details: <>
         <StatusBadge tone={signal.tone}>{signal.label}</StatusBadge>
         <p>{signal.detail}</p>
-        <p>{reliabilityLabel(resolvedReliability(friend.reliability, friend.personal_effective_sample_size ?? friend.shared_games, friend.actionable))} · campione effettivo delle evidenze pesate: {Number(friend.personal_effective_sample_size ?? 0).toFixed(1)}</p>
+        <p>{reliabilityLabel(resolvedReliability(friend.reliability, friend.decision_games ?? friend.shared_games, friend.actionable, thresholds))} · campione effettivo delle evidenze pesate: {Number(friend.personal_effective_sample_size ?? 0).toFixed(1)}</p>
         <p>Percentuale di vittorie osservata {pct(friend.friend_win_rate)} · riferimento {pct(friend.baseline_win_rate, 1)}</p>
         <p>Intervallo {credibleMassLabel(friend.credible_mass ?? credibleMass)} della stima vittorie {pct(credibleBounds(friend).lower, 1)}–{pct(credibleBounds(friend).upper, 1)}</p>
       </>,
     }
   })
-  const groupAliases = (group: FriendGroupDto) => <div className="empty-actions">{group.aliases.map((alias) => <span className="alias-chip" key={alias}>{alias}<button type="button" aria-label={`Rimuovi alias ${alias}`} onClick={() => setConfirmAction({ kind: 'delete-alias', id: group.id, alias })}><X aria-hidden="true" /></button></span>)}</div>
-  const groupActions = (group: FriendGroupDto) => <span className="empty-actions"><button className="icon-button" type="button" aria-label={`Aggiungi persone a ${group.name}`} title="Aggiungi persone" onClick={() => { setAddAliasesGroup(group); setAddAliasesValue('') }}><Plus aria-hidden="true" /></button><button className="icon-button" type="button" aria-label={`Rinomina ${group.name}`} onClick={() => { setRenameGroup(group); setRenameValue(group.name) }}><Pencil aria-hidden="true" /></button><button className="icon-button" type="button" aria-label={`Elimina ${group.name}`} onClick={() => setConfirmAction({ kind: 'delete-group', id: group.id })}><Trash2 aria-hidden="true" /></button></span>
+  const groupAliases = (group: FriendGroupDto) => <div className="empty-actions">{group.aliases.map((alias) => <span className="alias-chip" key={alias}>{alias}<button type="button" aria-label={`Rimuovi alias ${alias}`} onClick={() => changeDialog(() => setConfirmAction({ kind: 'delete-alias', id: group.id, alias }))}><X aria-hidden="true" /></button></span>)}</div>
+  const groupActions = (group: FriendGroupDto) => <span className="empty-actions"><button className="icon-button" type="button" aria-label={`Aggiungi persone a ${group.name}`} title="Aggiungi persone" onClick={() => changeDialog(() => { setAddAliasesGroup(group); setAddAliasesValue('') })}><Plus aria-hidden="true" /></button><button className="icon-button" type="button" aria-label={`Rinomina ${group.name}`} onClick={() => changeDialog(() => { setRenameGroup(group); setRenameValue(group.name) })}><Pencil aria-hidden="true" /></button><button className="icon-button" type="button" aria-label={`Elimina ${group.name}`} onClick={() => changeDialog(() => setConfirmAction({ kind: 'delete-group', id: group.id }))}><Trash2 aria-hidden="true" /></button></span>
   const visualGroups: DataVisualItem[] = (friends.data?.manual_groups ?? []).map((group) => ({
     id: String(group.id),
     label: group.name,
@@ -256,11 +282,12 @@ export function FriendsPage() {
 
   return (
     <div className="page-stack">
-      <PageHeader eyebrow="Squadra" title={<>Compagni</>} copy="Le persone incontrate nella tua squadra sono riconosciute dai Riot ID. Confronta le partite condivise e riunisci i diversi Riot ID della stessa persona." aside={<button className="button" type="button" onClick={() => setCreateOpen(true)}><Plus aria-hidden="true" /> Nuovo gruppo</button>} />
-      <p className="context-note" role="status">Contesto: {filters.queue === 'all' ? 'tutte le modalità' : queueLabel(filters.queue)} · tutto lo storico · ruolo {roleLabel(filters.role)}. Per un confronto omogeneo seleziona una modalità e un ruolo specifici.</p>
+      <PageHeader eyebrow="Squadra" title={<>Compagni</>} copy="Le persone incontrate nella tua squadra sono riconosciute dai Riot ID. Confronta le partite condivise e riunisci i diversi Riot ID della stessa persona." aside={<button className="button" type="button" onClick={() => changeDialog(() => setCreateOpen(true))}><Plus aria-hidden="true" /> Nuovo gruppo</button>} />
+      <p className="context-note" role="status">Contesto: {queueKnown ? filters.queue === 'all' ? 'tutte le modalità' : queueLabel(filters.queue) : 'modalità del link'} · tutto lo storico · ruolo {roleCaption}. Per un confronto omogeneo seleziona una modalità e un ruolo specifici.</p>
       <FilterBar>
         <label>Modalità del confronto
           <select value={filters.queue} onChange={(event) => update('queue', event.target.value, 'all')}>
+            {!queueKnown ? <option value={filters.queue} disabled>Modalità del link</option> : null}
             <option value="all">Tutte le modalità · aggregato</option>
             <option value="420">Classificata Solo/Duo</option>
             <option value="440">Classificata Flex</option>
@@ -274,6 +301,7 @@ export function FriendsPage() {
         </label>
         <label>Ruolo del confronto
           <select value={filters.role} onChange={(event) => update('role', event.target.value, 'ALL')}>
+            {!roleKnown ? <option value={filters.role} disabled>Ruolo {roleCaption}</option> : null}
             <option value="ALL">Tutti i ruoli · aggregato</option>
             <option value="TOP">Corsia superiore</option>
             <option value="JUNGLE">Giungla</option>
@@ -283,8 +311,9 @@ export function FriendsPage() {
           </select>
         </label>
         <label>Nome o Riot ID<input value={filters.friend_q} onChange={(event) => update('name', event.target.value)} placeholder="Cerca un compagno" /></label>
-        <label>Conta le partite dal<input type="date" value={filters.games_from} onChange={(event) => update('games_from', event.target.value)} /></label>
-        <label>Ultima partita dal<input type="date" value={filters.last_game_from} onChange={(event) => update('last_game_from', event.target.value)} /></label>
+        <label>Conta le partite dal<input type="date" aria-describedby="friends-date-convention" value={filters.games_from} onChange={(event) => update('games_from', event.target.value)} /></label>
+        <label>Ultima partita dal<input type="date" aria-describedby="friends-date-convention" value={filters.last_game_from} onChange={(event) => update('last_game_from', event.target.value)} /></label>
+        <span className="filter-help" id="friends-date-convention">Date mostrate e filtri temporali in UTC.</span>
         <label>Almeno quante partite?
           <input type="text" inputMode="numeric" pattern="[0-9]*" value={minGamesDraft} aria-invalid={Boolean(minGamesError)} aria-describedby={minGamesError ? 'friends-min-games-error' : undefined} onChange={(event) => setMinimumGames({ ...minimumGames, draft: event.target.value })} onBlur={commitMinimumGames} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur() } }} />
           {minGamesError ? <span className="field-error" id="friends-min-games-error">{minGamesError}</span> : null}
@@ -324,8 +353,8 @@ export function FriendsPage() {
                 sampleLabel="Partite condivise"
                 listLabel="Tabella"
               ><DataTable label="Classifica dei compagni di squadra">
-                <thead><tr><th>#</th><th>Compagno</th><th aria-sort={sortAria('games')}><button className="sort-button" type="button" onClick={() => toggleSort('games')}>Partite {sortAria('games') === 'ascending' ? <ArrowUp aria-hidden="true" /> : <ArrowDown aria-hidden="true" />}</button></th><th aria-sort={sortAria('winrate')}><button className="sort-button" type="button" onClick={() => toggleSort('winrate')}>Percentuale di vittorie osservata {sortAria('winrate') === 'ascending' ? <ArrowUp aria-hidden="true" /> : <ArrowDown aria-hidden="true" />}</button></th><th>Stima e intervallo {credibleMassLabel(credibleMass)}</th><th>Segnale</th><th aria-sort={sortAria('last_game')}><button className="sort-button" type="button" onClick={() => toggleSort('last_game')}>Ultima partita {sortAria('last_game') === 'ascending' ? <ArrowUp aria-hidden="true" /> : <ArrowDown aria-hidden="true" />}</button></th></tr></thead>
-                <tbody>{friends.data.items.map((friend, index) => { const signal = friendSignal(friend, decisionMinimumGames, meaningfulDelta); return <tr key={friend.friend_key}><td className="row-rank">{String(index + 1).padStart(2, '0')}</td><th scope="row">{friend.friend}<small>{friend.accounts_played_with} account selezionati</small></th><td className="numeric">{friend.shared_games}</td><td>{pct(friend.friend_win_rate)}</td><td><strong>{pct(friend.posterior_win_rate, 1)}</strong><small>{pct(credibleBounds(friend).lower, 1)}–{pct(credibleBounds(friend).upper, 1)}</small><small>Riferimento {pct(friend.baseline_win_rate, 1)} · campione effettivo pesato {Number(friend.personal_effective_sample_size ?? 0).toFixed(1)}</small></td><td><StatusBadge tone={signal.tone}>{signal.label}</StatusBadge><small>{signal.brief}</small><small>{reliabilityLabel(resolvedReliability(friend.reliability, friend.personal_effective_sample_size ?? friend.shared_games, friend.actionable))}</small></td><td>{formatDate(friend.last_game)}</td></tr> })}</tbody>
+                <thead><tr><th>#</th><th>Compagno</th><th aria-sort={sortAria('games')}><button className="sort-button" type="button" onClick={() => toggleSort('games')}>Partite {sortAria('games') === 'ascending' ? <ArrowUp aria-hidden="true" /> : <ArrowDown aria-hidden="true" />}</button></th><th aria-sort={sortAria('winrate')}><button className="sort-button" type="button" onClick={() => toggleSort('winrate')}>Percentuale di vittorie osservata {sortAria('winrate') === 'ascending' ? <ArrowUp aria-hidden="true" /> : <ArrowDown aria-hidden="true" />}</button></th><th>Stima e intervallo</th><th>Segnale</th><th aria-sort={sortAria('last_game')}><button className="sort-button" type="button" onClick={() => toggleSort('last_game')}>Ultima partita {sortAria('last_game') === 'ascending' ? <ArrowUp aria-hidden="true" /> : <ArrowDown aria-hidden="true" />}</button></th></tr></thead>
+                <tbody>{friends.data.items.map((friend, index) => { const signal = friendSignal(friend, decisionMinimumGames, meaningfulDelta); return <tr key={friend.friend_key}><td className="row-rank">{String(index + 1).padStart(2, '0')}</td><th scope="row">{friend.friend}<small>{friend.accounts_played_with} account selezionati</small></th><td className="numeric">{friend.shared_games}</td><td>{pct(friend.friend_win_rate)}</td><td><strong>{pct(friend.posterior_win_rate, 1)}</strong><small>{credibleMassLabel(friend.credible_mass ?? credibleMass)} · {pct(credibleBounds(friend).lower, 1)}–{pct(credibleBounds(friend).upper, 1)}</small><small>Riferimento {pct(friend.baseline_win_rate, 1)} · campione effettivo pesato {Number(friend.personal_effective_sample_size ?? 0).toFixed(1)}</small></td><td><StatusBadge tone={signal.tone}>{signal.label}</StatusBadge><small>{signal.brief}</small><small>{reliabilityLabel(resolvedReliability(friend.reliability, friend.decision_games ?? friend.shared_games, friend.actionable, thresholds))}</small></td><td>{formatDate(friend.last_game, { timeZone: 'UTC' })}</td></tr> })}</tbody>
               </DataTable></DataExplorer> : <EmptyState title="Nessun risultato per questi filtri" description="Riduci la soglia o amplia l'intervallo temporale. Gli account considerati non vengono modificati automaticamente." />}
             </Surface>
             <Surface className="group-panel">
@@ -345,17 +374,18 @@ export function FriendsPage() {
         </QueryResults>
       ) : null}
 
-      <Modal open={createOpen} onOpenChange={setCreateOpen} title="Crea gruppo di nomi" description="Unisci i diversi nomi che rappresentano la stessa persona. Le partite non vengono modificate.">
-        <form className="stack-form" onSubmit={submitCreate}><label>Nome gruppo<input value={groupName} onChange={(event) => setGroupName(event.target.value)} required maxLength={80} /></label><label>Alias, separati da virgola<textarea value={aliases} onChange={(event) => setAliases(event.target.value)} placeholder="Nome#EUW, AltroNome#EUW" required /></label>{groupMutation.isError ? <p className="form-error" role="alert">{apiErrorLabel(groupMutation.error.message)}</p> : null}<div className="dialog-actions"><button className="button button--ghost" type="button" onClick={() => setCreateOpen(false)}>Annulla</button><button className="button" type="submit" disabled={groupMutation.isPending}>{groupMutation.isPending ? 'Creazione…' : 'Crea gruppo'}</button></div></form>
+      <Modal open={createOpen} onOpenChange={(open) => changeDialog(() => setCreateOpen(open))} title="Crea gruppo di nomi" description="Unisci i diversi nomi che rappresentano la stessa persona. Le partite non vengono modificate.">
+        <form className="stack-form" onSubmit={submitCreate}><label>Nome gruppo<input value={groupName} onChange={(event) => setGroupName(event.target.value)} required maxLength={80} disabled={operationPending} /></label><label>Alias, separati da virgola<textarea value={aliases} onChange={(event) => setAliases(event.target.value)} placeholder="Nome#EUW, AltroNome#EUW" required disabled={operationPending} /></label>{operationError ? <p className="form-error" role="alert">{apiErrorLabel(groupMutation.error.message)}</p> : null}<div className="dialog-actions"><button className="button button--ghost" type="button" onClick={() => changeDialog(() => setCreateOpen(false))}>Annulla</button><button className="button" type="submit" disabled={operationPending}>{operationPending ? 'Creazione…' : 'Crea gruppo'}</button></div></form>
       </Modal>
-      <Modal open={Boolean(addAliasesGroup)} onOpenChange={(open) => !open && setAddAliasesGroup(null)} title={`Aggiungi persone a ${addAliasesGroup?.name ?? 'gruppo'}`} description="Inserisci uno o più Riot ID, separati da virgole o su righe diverse.">
-        <form className="stack-form" onSubmit={submitAddAliases}><label>Riot ID<textarea value={addAliasesValue} onChange={(event) => setAddAliasesValue(event.target.value)} placeholder="Nome#EUW, AltroNome#EUW" required /></label>{groupMutation.isError ? <p className="form-error" role="alert">{apiErrorLabel(groupMutation.error.message)}</p> : null}<div className="dialog-actions"><button className="button button--ghost" type="button" onClick={() => setAddAliasesGroup(null)}>Annulla</button><button className="button" type="submit" disabled={groupMutation.isPending}>{groupMutation.isPending ? 'Aggiunta…' : 'Aggiungi al gruppo'}</button></div></form>
+      <Modal open={Boolean(addAliasesGroup)} onOpenChange={(open) => !open && changeDialog(() => setAddAliasesGroup(null))} title={`Aggiungi persone a ${addAliasesGroup?.name ?? 'gruppo'}`} description="Inserisci uno o più Riot ID, separati da virgole o su righe diverse.">
+        <form className="stack-form" onSubmit={submitAddAliases}><label>Riot ID<textarea value={addAliasesValue} onChange={(event) => setAddAliasesValue(event.target.value)} placeholder="Nome#EUW, AltroNome#EUW" required disabled={operationPending} /></label>{operationError ? <p className="form-error" role="alert">{apiErrorLabel(groupMutation.error.message)}</p> : null}<div className="dialog-actions"><button className="button button--ghost" type="button" onClick={() => changeDialog(() => setAddAliasesGroup(null))}>Annulla</button><button className="button" type="submit" disabled={operationPending}>{operationPending ? 'Aggiunta…' : 'Aggiungi al gruppo'}</button></div></form>
       </Modal>
-      <Modal open={Boolean(renameGroup)} onOpenChange={(open) => !open && setRenameGroup(null)} title="Rinomina gruppo di nomi">
-        <form className="stack-form" onSubmit={(event) => { event.preventDefault(); if (renameGroup && renameValue.trim()) groupMutation.mutate({ kind: 'rename', id: renameGroup.id, name: renameValue.trim() }) }}><label>Nuovo nome<input value={renameValue} onChange={(event) => setRenameValue(event.target.value)} required maxLength={80} /></label><div className="dialog-actions"><button className="button button--ghost" type="button" onClick={() => setRenameGroup(null)}>Annulla</button><button className="button" type="submit" disabled={groupMutation.isPending}>Salva nome</button></div></form>
+      <Modal open={Boolean(renameGroup)} onOpenChange={(open) => !open && changeDialog(() => setRenameGroup(null))} title="Rinomina gruppo di nomi">
+        <form className="stack-form" onSubmit={(event) => { event.preventDefault(); if (renameGroup && renameValue.trim()) submitGroupAction({ kind: 'rename', id: renameGroup.id, name: renameValue.trim() }) }}><label>Nuovo nome<input value={renameValue} onChange={(event) => setRenameValue(event.target.value)} required maxLength={80} disabled={operationPending} /></label>{operationError ? <p className="form-error" role="alert">{apiErrorLabel(groupMutation.error.message)}</p> : null}<div className="dialog-actions"><button className="button button--ghost" type="button" onClick={() => changeDialog(() => setRenameGroup(null))}>Annulla</button><button className="button" type="submit" disabled={operationPending}>Salva nome</button></div></form>
       </Modal>
-      <Modal open={Boolean(confirmAction)} onOpenChange={(open) => !open && setConfirmAction(null)} title={confirmAction?.kind === 'delete-alias' ? 'Rimuovere questo alias?' : 'Rimuovere questo gruppo?'} description="L'operazione non cancella alcuna partita, ma modifica il modo in cui le identità vengono aggregate.">
-        <div className="dialog-actions"><button className="button button--ghost" type="button" onClick={() => setConfirmAction(null)}>Annulla</button><button className="button button--danger" type="button" disabled={groupMutation.isPending} onClick={() => confirmAction && groupMutation.mutate(confirmAction)}>Conferma rimozione</button></div>
+      <Modal open={Boolean(confirmAction)} onOpenChange={(open) => !open && changeDialog(() => setConfirmAction(null))} title={confirmAction?.kind === 'delete-alias' ? 'Rimuovere questo alias?' : 'Rimuovere questo gruppo?'} description="L'operazione non cancella alcuna partita, ma modifica il modo in cui le identità vengono aggregate.">
+        {operationError ? <p className="form-error" role="alert">{apiErrorLabel(groupMutation.error.message)}</p> : null}
+        <div className="dialog-actions"><button className="button button--ghost" type="button" onClick={() => changeDialog(() => setConfirmAction(null))}>Annulla</button><button className="button button--danger" type="button" disabled={operationPending} onClick={() => confirmAction && submitGroupAction(confirmAction)}>Conferma rimozione</button></div>
       </Modal>
     </div>
   )

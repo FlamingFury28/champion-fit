@@ -1,6 +1,9 @@
 import { render, screen, within } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, expect, it } from 'vitest'
 import type { MatchupItemDto } from '../api/types'
+import { queryKeys } from '../api/queries'
+import { AlgorithmSettingsProvider, RECOMMENDED_ALGORITHM_SETTINGS, setSetting } from '../app/algorithm-settings'
 import { MatchupList } from './MatchupList'
 
 function matchup(overrides: Partial<MatchupItemDto>): MatchupItemDto {
@@ -42,6 +45,20 @@ function matchup(overrides: Partial<MatchupItemDto>): MatchupItemDto {
 }
 
 describe('MatchupList', () => {
+  it('conta una partita condivisa una sola volta nel campione personale distinto', () => {
+    render(<MatchupList direction="loses" items={[matchup({ games: 12, unique_games: 4, decision_games: 4, personal_effective_sample_size: 12, effective_sample_size: 12 })]} />)
+    expect(screen.getByText(/Partite personali distinte 4 · totale a supporto 12/)).toBeInTheDocument()
+  })
+
+  it.each([{ delta: .09, points: '9' }, { delta: undefined, points: '7' }])('descrive soglia effetto $points e numerosità configurate', ({ delta, points }) => {
+    const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } })
+    const settings = setSetting(setSetting(RECOMMENDED_ALGORITHM_SETTINGS, 'evidence.min_games', 40), 'evidence.meaningful_delta', .07)
+    client.setQueryData(queryKeys.algorithmSettings, { revision: 1, settings })
+    render(<QueryClientProvider client={client}><AlgorithmSettingsProvider><MatchupList direction="loses" items={[matchup({ meaningful_delta: delta })]} /></AlgorithmSettingsProvider></QueryClientProvider>)
+    expect(screen.getByText(`Probabilità di uno svantaggio di almeno ${points} punti percentuali`)).toBeInTheDocument()
+    expect(screen.getByText(/La decisione richiede almeno 40 partite personali/)).toBeInTheDocument()
+  })
+
   it('riserva il primo ban consigliato al primo segnale operativo', () => {
     render(<MatchupList direction="loses" items={[
       matchup({ champion: 'Zed' }),

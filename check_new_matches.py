@@ -14,6 +14,7 @@ import os
 import sqlite3
 import threading
 import time
+from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Mapping
@@ -39,6 +40,8 @@ from riot_sync import (
 from storage import SQLiteStorage
 from account_identity import AccountIdentityConflict, canonical_account_name, reconcile_account_identity
 from riot_sync import account_raw_matches, persist_account_materialization
+from sync_runs import SyncRun, current_run
+from runtime_metrics import configure_logging, measure, metrics_scope, record_metric
 
 
 _API_REQUEST_INTERVAL = 1.22  # Below 100 requests per rolling 120 seconds per key.
@@ -115,40 +118,51 @@ def _retry_detail_ids(
         if current and current["account"]:
             account_scope.add(str(current["account"]))
     scope_params = tuple(sorted(account_scope))
-    placeholders = ",".join("?" for _ in scope_params)
-    for match_id in sorted(known_ids):
-        raw = connection.execute(
-            "SELECT payload_json FROM riot_match_raw WHERE match_id=?", (match_id,),
-        ).fetchone()
-        try:
-            cached = json.loads(raw["payload_json"]) if raw else None
-        except (TypeError, ValueError, json.JSONDecodeError):
-            cached = None
-        states = {
-            str(row["status"])
+    scope_placeholders = ",".join("?" for _ in scope_params)
+    ordered_ids = sorted(known_ids)
+    # Three bounded reads per batch replace three reads per historical match.
+    # Keep the same exact account/identity scope and evaluate the same statuses;
+    # an invalid payload owned by another player cannot force a provider call.
+    with measure("sync.retry_scan"):
+        record_metric("sync.retry.known_ids", len(ordered_ids))
+        for offset in range(0, len(ordered_ids), 400):
+            chunk = ordered_ids[offset:offset + 400]
+            placeholders = ",".join("?" for _ in chunk)
+            raw_by_id = {row["match_id"]: row["payload_json"] for row in connection.execute(
+                f"SELECT match_id,payload_json FROM riot_match_raw WHERE match_id IN ({placeholders})", tuple(chunk),
+            )}
+            states_by_id = defaultdict(set)
             for row in connection.execute(
-                f"SELECT status FROM riot_match_materialization "
-                f"WHERE match_id=? AND account IN ({placeholders})",
-                (match_id, *scope_params),
-            )
-        }
-        materialized = connection.execute(
-            f"SELECT 1 FROM match_quality "
-            f"WHERE match_id=? AND account IN ({placeholders}) LIMIT 1",
-            (match_id, *scope_params),
-        ).fetchone()
-        missing_raw = not isinstance(cached, dict) or not cached.get("info")
-        invalid = "invalid_payload" in states
-        needs_materialization = (
-            missing_raw or invalid or "identity_unresolved" in states
-            or (not states and materialized is None)
-            or ("eligible" in states and materialized is None)
-            or ("materialized" in states and materialized is None)
-        )
-        if needs_materialization:
-            retry.append(match_id)
-        if missing_raw or invalid:
-            refetch.append(match_id)
+                f"SELECT match_id,status FROM riot_match_materialization "
+                f"WHERE match_id IN ({placeholders}) AND account IN ({scope_placeholders})",
+                (*chunk, *scope_params),
+            ):
+                states_by_id[row["match_id"]].add(str(row["status"]))
+            materialized_ids = {row["match_id"] for row in connection.execute(
+                f"SELECT DISTINCT match_id FROM match_quality "
+                f"WHERE match_id IN ({placeholders}) AND account IN ({scope_placeholders})",
+                (*chunk, *scope_params),
+            )}
+            record_metric("sync.retry.batch_queries", 3)
+            for match_id in chunk:
+                try:
+                    cached = json.loads(raw_by_id.get(match_id))
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    cached = None
+                states = states_by_id[match_id]
+                materialized = match_id in materialized_ids
+                missing_raw = not isinstance(cached, dict) or not cached.get("info")
+                invalid = "invalid_payload" in states
+                needs_materialization = (
+                    missing_raw or invalid or "identity_unresolved" in states
+                    or (not states and not materialized)
+                    or ("eligible" in states and not materialized)
+                    or ("materialized" in states and not materialized)
+                )
+                if needs_materialization:
+                    retry.append(match_id)
+                if missing_raw or invalid:
+                    refetch.append(match_id)
     return retry, refetch
 
 
@@ -257,6 +271,18 @@ def _normalize(
 def check_account(account: str, key: str, db_path: Path) -> dict:
     initialize_ingestion_database(db_path)
     storage = SQLiteStorage(db_path, SCHEMA_PATH)
+    run = current_run()
+    if run is not None:
+        return _check_account(account, key, db_path, storage, run)
+    run = SyncRun(storage, "incremental", [account])
+    with metrics_scope("sync.incremental", run_id=run.run_id), run:
+        record_metric("sync_accounts", 1)
+        with run.account_attempt(account):
+            return _check_account(account, key, db_path, storage, run)
+
+
+def _check_account(account: str, key: str, db_path: Path, storage, run: SyncRun) -> dict:
+    requested_account = account
     game_name, tag_line = riot_id(account)
     account_path = (
         f"/riot/account/v1/accounts/by-riot-id/"
@@ -346,25 +372,29 @@ def check_account(account: str, key: str, db_path: Path) -> dict:
         connection.execute("INSERT INTO tracked_account_puuids(puuid,account) VALUES(?,?) ON CONFLICT(puuid) DO UPDATE SET account=excluded.account", (puuid, account))
         record_verified_account_identity(connection, account, puuid, identity, fetched_at)
         _all_ids, details = account_raw_matches(connection, account)
-        result = persist_account_materialization(
-            connection, account, identity_evidence(connection, account, puuid, identity),
-            details, "riot_api_new_matches", participant_writer=upsert_match_participants,
-        )
+        with measure("sync.materialization"):
+            result = persist_account_materialization(
+                connection, account, identity_evidence(connection, account, puuid, identity),
+                details, "riot_api_new_matches", participant_writer=upsert_match_participants,
+            )
+        result = result | {
+            "account": account, "recent_ids": len(ids),
+            "new_ids": len(set(ids) - set(known_ids)), "retried_raw": len(retry_ids),
+            "pending_details": len(pending_details), "raw_known": len(_all_ids),
+            "raw_available": len(details), "raw_missing": len(set(_all_ids) - set(details)),
+        }
+        run.record_result(connection, requested_account, result, resolved_account=account)
         connection.commit()
     except BaseException:
         connection.rollback()
         raise
     finally:
         connection.close()
-    return result | {
-        "account": account, "recent_ids": len(ids),
-        "new_ids": len(set(ids) - set(known_ids)),
-        "retried_raw": len(retry_ids),
-        "pending_details": len(pending_details),
-    }
+    return result
 
 
 def main() -> None:
+    configure_logging()
     parser = argparse.ArgumentParser()
     parser.add_argument("--api-keys", default=os.environ.get("RIOT_API_KEYS"))
     parser.add_argument("--db", type=Path, default=DB_PATH)
@@ -378,42 +408,61 @@ def main() -> None:
         accounts = _stored_accounts(args.db)
     if not accounts:
         raise SystemExit("Nessun account configurato o salvato: imposta RIOT_ACCOUNTS o passa --account")
+    pending_accounts, seen_accounts = [], set()
+    for account in accounts:
+        identity_key = normalize_riot_id(account) or str(account).strip().casefold()
+        if identity_key and identity_key not in seen_accounts:
+            pending_accounts.append(str(account).strip())
+            seen_accounts.add(identity_key)
+    accounts = tuple(pending_accounts)
+    initialize_ingestion_database(args.db)
+    storage = SQLiteStorage(args.db, SCHEMA_PATH)
     marker = SyncActivityMarker(args.db, len(accounts))
     marker.start()
     try:
-        assignments = [(account, keys[index % len(keys)]) for index, account in enumerate(accounts)]
-        results, unresolved, identity_conflicts = [], [], []
-        with ThreadPoolExecutor(max_workers=min(len(keys), len(assignments))) as executor:
-            futures = {executor.submit(check_account, account, key, args.db): account for account, key in assignments}
-            for future in as_completed(futures):
-                account = futures[future]
-                try:
-                    result = future.result()
-                    results.append(result)
-                    print(json.dumps(result, ensure_ascii=True), flush=True)
-                except AccountIdentityConflict as error:
-                    identity_conflicts.append(account)
-                    print(json.dumps({
-                        "identity_conflict": account,
-                        "reason": str(error),
-                    }, ensure_ascii=True), flush=True)
-                except RiotAPIError as error:
-                    if error.status_code == 404 and error.path.startswith("/riot/account/v1/"):
-                        unresolved.append(account)
-                    else:
-                        raise
-        print(json.dumps({
-            "accounts": len(accounts),
-            "checked": len(results),
-            "unresolved": sorted(unresolved),
-            "identity_conflicts": sorted(identity_conflicts),
-            "new_ids": sum(r["new_ids"] for r in results),
-            "retried_raw": sum(r["retried_raw"] for r in results),
-            "pending_details": sum(r["pending_details"] for r in results),
-            "inserted": sum(r["inserted"] for r in results),
-            "removed_stale": sum(r["removed_stale"] for r in results),
-            "identity_edges_persisted": sum(r["identity_edges_persisted"] for r in results),
-        }, ensure_ascii=True), flush=True)
+        with metrics_scope("sync.incremental", run_id=marker.run_id), SyncRun(
+            storage, "incremental", accounts, run_id=marker.run_id,
+        ) as run:
+            record_metric("sync_accounts", len(accounts))
+            def checked_account(account, key):
+                with metrics_scope("sync.incremental.account", run_id=run.run_id), run.account_attempt(account):
+                    result = check_account(account, key, args.db)
+                    run.complete_account(account, result, resolved_account=result.get("account", account))
+                    return result
+
+            assignments = [(account, keys[index % len(keys)]) for index, account in enumerate(accounts)]
+            results, unresolved, identity_conflicts = [], [], []
+            with ThreadPoolExecutor(max_workers=min(len(keys), len(assignments))) as executor:
+                futures = {executor.submit(checked_account, account, key): account for account, key in assignments}
+                for future in as_completed(futures):
+                    account = futures[future]
+                    try:
+                        result = future.result()
+                        results.append(result)
+                        print(json.dumps(result, ensure_ascii=True), flush=True)
+                    except AccountIdentityConflict as error:
+                        identity_conflicts.append(account)
+                        print(json.dumps({
+                            "identity_conflict": account,
+                            "reason": str(error),
+                        }, ensure_ascii=True), flush=True)
+                    except RiotAPIError as error:
+                        if error.status_code == 404 and error.path.startswith("/riot/account/v1/"):
+                            unresolved.append(account)
+                        else:
+                            raise
+            print(json.dumps({
+                "accounts": len(accounts),
+                "checked": len(results),
+                "unresolved": sorted(unresolved),
+                "identity_conflicts": sorted(identity_conflicts),
+                "new_ids": sum(r["new_ids"] for r in results),
+                "retried_raw": sum(r["retried_raw"] for r in results),
+                "pending_details": sum(r["pending_details"] for r in results),
+                "inserted": sum(r["inserted"] for r in results),
+                "removed_stale": sum(r["removed_stale"] for r in results),
+                "identity_edges_persisted": sum(r["identity_edges_persisted"] for r in results),
+            }, ensure_ascii=True), flush=True)
     finally:
         marker.close()
 

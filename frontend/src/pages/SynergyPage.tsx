@@ -3,18 +3,19 @@ import { Link2, Unlink, UsersRound } from 'lucide-react'
 import { useSearchParams } from 'react-router'
 import { synergyQuery } from '../api/queries'
 import type { MinimumReliability, SynergyItemDto } from '../api/types'
-import { pct, ROLES } from '../app/filters'
+import { normalizeRole, pct, ROLES } from '../app/filters'
 import { queueLabel, roleLabel } from '../app/labels'
+import { canonicalQueueFilter } from '../app/queue-filter'
 import { credibleBounds, credibleMassLabel, useAlgorithmSettings } from '../app/algorithm-settings'
-import { isVisibleReliability, priorSourceLabel, reliabilityLabel, reliabilityTone, resolvedReliability } from '../app/reliability'
+import { evidenceThresholds, isVisibleReliability, meaningfulDeltaPoints, priorSourceLabel, reliabilityLabel, reliabilityTone, resolvedReliability } from '../app/reliability'
 import { signedPoints } from '../app/presentation'
 import { useScope } from '../app/scope'
 import { DataExplorer, type DataVisualItem } from '../components/DataExplorer'
 import { ChampionAvatar, EmptyState, ErrorState, EvidenceBar, FilterBar, MetricCard, PageHeader, QueryResults, Skeleton, StatusBadge, Surface } from '../components/ui'
 
 const minimumReliabilityOptions: Array<{ value: MinimumReliability; label: string }> = [
-  { value: 'weak', label: 'Debole o migliore · almeno 3 esiti' },
-  { value: 'indicative', label: 'Indicativa o migliore · almeno 8 esiti' },
+  { value: 'weak', label: 'Debole o migliore' },
+  { value: 'indicative', label: 'Indicativa o migliore' },
   { value: 'reliable', label: 'Affidabile · soglia decisionale superata' },
 ]
 
@@ -93,14 +94,15 @@ function SynergyList({
   items: SynergyItemDto[]
   minGames: number
 }) {
-  const { credibleMass } = useAlgorithmSettings()
+  const { credibleMass, settings } = useAlgorithmSettings()
+  const thresholds = evidenceThresholds(settings)
   const rows = items.map((item, index) => {
     const supportingSampleSize = item.effective_sample_size ?? item.games
-    const personalSampleSize = item.personal_effective_sample_size ?? supportingSampleSize
+    const personalSampleSize = item.decision_games ?? item.unique_games ?? item.personal_effective_sample_size ?? supportingSampleSize
     const posterior = item.posterior_win_rate ?? item.win_rate
     const baseline = item.baseline_win_rate ?? posterior
     const lift = item.posterior_lift_pp ?? item.relative_delta_pp ?? posterior - baseline
-    const reliability = resolvedReliability(item.reliability, personalSampleSize, item.actionable)
+    const reliability = resolvedReliability(item.reliability, personalSampleSize, item.actionable, thresholds)
     const directionProbability = direction === 'positive'
       ? item.probability_meaningful_advantage ?? item.direction_probability ?? item.direction_confidence
       : item.probability_meaningful_disadvantage ?? item.direction_probability ?? item.direction_confidence
@@ -110,7 +112,8 @@ function SynergyList({
       <StatusBadge tone={signal.tone}>{signal.label}</StatusBadge>
     </>
     const sampleDescription = `${item.games} partite osservate · ${personalSampleSize.toFixed(1)} partite personali distinte · ${supportingSampleSize.toFixed(1)} totali a supporto · ipotesi iniziale: ${priorSourceLabel(item.prior_source ?? 'global')} (${item.prior_games ?? 0} partite)`
-    const evidence = <EvidenceBar value={directionProbability ?? 0} label="Probabilità di un effetto oltre 3 punti percentuali" secondary={pct(directionProbability, 1)} />
+    const deltaPoints = meaningfulDeltaPoints(item.meaningful_delta, thresholds)
+    const evidence = <EvidenceBar value={directionProbability ?? 0} label={`Probabilità di un effetto oltre ${deltaPoints} punti percentuali`} secondary={pct(directionProbability, 1)} />
     return { item, index, personalSampleSize, posterior, baseline, lift, reliability, signal, badges, sampleDescription, evidence }
   })
   const visualItems: DataVisualItem[] = rows.map(({ item, personalSampleSize, posterior, baseline, lift, signal, badges, sampleDescription, evidence }) => ({
@@ -188,21 +191,26 @@ function SynergyList({
 
 export function SynergyPage({ embedded = false }: { embedded?: boolean }) {
   const { scope, state, scopeReady, availableAccounts, setAccounts, clearCompanion } = useScope()
+  const { settings } = useAlgorithmSettings()
+  const thresholds = evidenceThresholds(settings)
   const [params, setParams] = useSearchParams()
   const champion = params.get('champion') || 'ALL'
   const minReliability = parseMinimumReliability(params.get('min_reliability'))
   const includeExploratory = params.get('include_exploratory') === '1'
-  const requestedRole = (params.get('role') ?? 'ALL').toUpperCase()
-  const requestedQueue = params.get('queue') ?? 'all'
-  const requestedDays = params.get('days') ?? 'all'
+  const requestedQueue = canonicalQueueFilter(params.get('queue')) || 'all'
+  const hasLinkedQueue = !['all', '420', '440', '400', '430', '480', '490', '700'].includes(requestedQueue)
+  const requestedDays = params.get('days') || 'all'
+  const hasLinkedPeriod = !['all', '90', '180', '365'].includes(requestedDays)
   const filters = {
     minReliability,
     includeExploratory,
-    role: ROLES.includes(requestedRole as typeof ROLES[number]) ? requestedRole : 'ALL',
-    queue: ['all', '420', '440', '400', '430', '450', '480', '490', '700'].includes(requestedQueue) ? requestedQueue : 'all',
-    days: ['all', '90', '180', '365'].includes(requestedDays) ? requestedDays : 'all',
+    role: normalizeRole(params.get('role')),
+    queue: requestedQueue,
+    days: requestedDays,
   }
   const synergy = useQuery({ ...synergyQuery(scope, champion, filters), enabled: scopeReady })
+  const availableChampions = synergy.data?.available_champions ?? []
+  const needsSelectedChampionOption = champion !== 'ALL' && !availableChampions.some((item) => item.champion === champion)
   const contextRole = synergy.data?.context?.role ?? filters.role
   const contextQueue = synergy.data?.context?.queue ?? filters.queue
   const contextDays = synergy.data?.context?.days ?? filters.days
@@ -214,11 +222,11 @@ export function SynergyPage({ embedded = false }: { embedded?: boolean }) {
   }, { replace: true })
 
   const betterWith = (synergy.data?.better_with ?? []).filter((item) => {
-    const reliability = resolvedReliability(item.reliability, item.personal_effective_sample_size ?? item.effective_sample_size ?? item.games, item.actionable)
+    const reliability = resolvedReliability(item.reliability, item.decision_games ?? item.unique_games ?? item.personal_effective_sample_size ?? item.effective_sample_size ?? item.games, item.actionable, thresholds)
     return isVisibleReliability(reliability, minReliability, includeExploratory)
   })
   const worseWith = (synergy.data?.worse_with ?? []).filter((item) => {
-    const reliability = resolvedReliability(item.reliability, item.personal_effective_sample_size ?? item.effective_sample_size ?? item.games, item.actionable)
+    const reliability = resolvedReliability(item.reliability, item.decision_games ?? item.unique_games ?? item.personal_effective_sample_size ?? item.effective_sample_size ?? item.games, item.actionable, thresholds)
     return isVisibleReliability(reliability, minReliability, includeExploratory)
   })
 
@@ -240,13 +248,15 @@ export function SynergyPage({ embedded = false }: { embedded?: boolean }) {
         <label>
           Modalità
           <select value={filters.queue} onChange={(event) => update('queue', event.target.value, 'all')}>
+            {hasLinkedQueue ? <option value={filters.queue} disabled>Modalità del link</option> : null}
             <option value="all">Tutte le modalità · aggregato</option>
-            {['420', '440', '400', '430', '450', '480', '490', '700'].map((queue) => <option key={queue} value={queue}>{queueLabel(queue)}</option>)}
+            {['420', '440', '400', '430', '480', '490', '700'].map((queue) => <option key={queue} value={queue}>{queueLabel(queue)}</option>)}
           </select>
         </label>
         <label>
           Periodo
           <select value={filters.days} onChange={(event) => update('days', event.target.value, 'all')}>
+            {hasLinkedPeriod ? <option value={filters.days} disabled>Periodo del link</option> : null}
             <option value="all">Tutto lo storico</option>
             <option value="90">Ultimi 90 giorni</option>
             <option value="180">Ultimi 180 giorni</option>
@@ -257,13 +267,14 @@ export function SynergyPage({ embedded = false }: { embedded?: boolean }) {
           Campione giocato
           <select value={champion} onChange={(event) => update('champion', event.target.value, 'ALL')}>
             <option value="ALL">Tutti i campioni</option>
-            {synergy.data?.available_champions.map((item) => <option key={item.champion} value={item.champion}>{item.champion} · {item.games} partite</option>)}
+            {needsSelectedChampionOption ? <option value={champion}>{champion}</option> : null}
+            {availableChampions.map((item) => <option key={item.champion} value={item.champion}>{item.champion} · {item.games} partite</option>)}
           </select>
         </label>
         <label>
           Affidabilità minima
           <select value={minReliability} onChange={(event) => update('min_reliability', event.target.value, 'weak')}>
-            {minimumReliabilityOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            {minimumReliabilityOptions.map((option) => <option key={option.value} value={option.value}>{option.label}{option.value === 'weak' ? ` · almeno ${thresholds.displayMinGames} esiti` : option.value === 'indicative' ? ` · almeno ${thresholds.indicativeGames} esiti` : ''}</option>)}
           </select>
         </label>
         <label className="filter-toggle" htmlFor="include-exploratory">
@@ -274,12 +285,12 @@ export function SynergyPage({ embedded = false }: { embedded?: boolean }) {
             checked={includeExploratory}
             onChange={(event) => update('include_exploratory', event.target.checked ? '1' : '0', '0')}
           />
-          Mostra esplorativi <small>meno di 3 esiti · da confermare</small>
+          Mostra esplorativi <small>meno di {thresholds.displayMinGames} esiti · da confermare</small>
         </label>
         {state.companion ? <StatusBadge tone="warning">filtro sui compagni attivo</StatusBadge> : null}
         <span className="filter-count" role="status">{synergy.isFetching && !synergy.isPending ? 'Aggiornamento risultati…' : `${betterWith.length + worseWith.length} segnali`}</span>
       </FilterBar>
-      <p className="context-note" role="status">Contesto richiesto{synergy.data ? ' ed effettivo' : ''}: {roleLabel(contextRole)} · {queueLabel(contextQueue)} · {String(contextDays) === 'all' ? 'tutto lo storico' : `${contextDays} giorni`}.</p>
+      <p className="context-note" role="status">Contesto richiesto{synergy.data ? ' ed effettivo' : ''}: {roleLabel(contextRole)} · {queueLabel(contextQueue)} · {hasLinkedPeriod && !synergy.data ? 'periodo del link non valido' : String(contextDays) === 'all' ? 'tutto lo storico' : `${contextDays} giorni`}.</p>
       {synergy.isPending ? <Skeleton lines={8} /> : null}
       {synergy.isError ? <ErrorState error={synergy.error} onRetry={() => void synergy.refetch()} /> : null}
       {synergy.data ? (() => {
@@ -308,8 +319,8 @@ export function SynergyPage({ embedded = false }: { embedded?: boolean }) {
             />
           ) : (
             <div className="matchup-grid">
-              <SynergyList title="Sopra il riferimento" direction="positive" items={betterWith} minGames={synergy.data.min_games} />
-              <SynergyList title="Sotto il riferimento" direction="negative" items={worseWith} minGames={synergy.data.min_games} />
+              <SynergyList title="Sopra il riferimento" direction="positive" items={betterWith} minGames={thresholds.minGames} />
+              <SynergyList title="Sotto il riferimento" direction="negative" items={worseWith} minGames={thresholds.minGames} />
             </div>
           )}
           {synergy.data.games > 0 && coverage.games_with_roster === 0 ? (

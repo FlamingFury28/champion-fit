@@ -1,6 +1,7 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
 import type { PlaystylesResponse } from '../src/api/playstyles'
+import { RECOMMENDED_ALGORITHM_SETTINGS } from '../src/app/algorithm-settings'
 
 const DATA_VIEW_STORAGE_KEY = 'champion-fit:data-view:v2'
 
@@ -63,6 +64,9 @@ async function mockPlaystyles(page: Page, slowFlex = false) {
 test('@smoke stili: categorie, fonti, dati osservati e ipotesi distinte', async ({ page }, testInfo) => {
   await mockPlaystyles(page)
   const expectedCategory = response().categories[0]
+  if (!expectedCategory) throw new Error('Expected a playstyle category in the fixture')
+  const expectedReason = expectedCategory.reasons[0]
+  if (!expectedReason) throw new Error('Expected a playstyle explanation in the fixture')
   await page.getByRole('combobox', { name: 'Ruolo degli stili', exact: true }).selectOption('MIDDLE')
   await expect(page.getByLabel('Ruolo degli stili')).toHaveValue('MIDDLE')
   await expect(page.getByLabel('Modalità degli stili')).toHaveValue('420')
@@ -77,7 +81,7 @@ test('@smoke stili: categorie, fonti, dati osservati e ipotesi distinte', async 
   await expect(page.getByText(/Ruoli compatibili:/)).toBeVisible()
   await page.getByRole('button', { name: 'Perché Maghi?', exact: true }).click()
   await expect(page.getByText(/Il risultato dipende da questo campione/)).toBeVisible()
-  await expect(page.getByText(expectedCategory.reasons[0], { exact: true })).toBeVisible()
+  await expect(page.getByText(expectedReason, { exact: true })).toBeVisible()
   await expect(page.getByText(new RegExp(`Confronto corretto per una famiglia di ${expectedCategory.family_size} categorie`))).toBeVisible()
   await page.evaluate(() => { if (document.activeElement instanceof HTMLElement) document.activeElement.blur(); window.scrollTo(0, 0) })
   await page.screenshot({ path: testInfo.outputPath('playstyles-desktop.png'), fullPage: true })
@@ -196,6 +200,44 @@ test('radar resta disabilitato sotto il minimo di tre assi validi', async ({ pag
   await expect(behavior.locator('[data-view="details"]')).toBeVisible()
   await expect(behavior.getByText(/2 di 3 in questo contesto/)).toBeVisible()
   await expect.poll(() => page.evaluate((key) => localStorage.getItem(key), DATA_VIEW_STORAGE_KEY)).toBe(JSON.stringify({ view: 'radar' }))
+})
+
+test('@smoke tutto lo storico resta esplicito dopo refresh e nei collegamenti agli approfondimenti', async ({ page }) => {
+  await page.route('**/api/algorithm-settings', (route) => route.fulfill({ json: {
+    revision: 1, fingerprint: 'playstyles-period-fixture',
+    settings: RECOMMENDED_ALGORITHM_SETTINGS, defaults: RECOMMENDED_ALGORITHM_SETTINGS,
+    schema: [], history: [],
+  } }))
+  await mockPlaystyles(page)
+  const period = page.getByRole('combobox', { name: 'Periodo degli stili', exact: true })
+  await expect(period).toHaveValue('180')
+  await period.selectOption('90')
+  await expect(page.locator('.playstyles-auto')).toContainText('ultimi 90 giorni')
+
+  const allHistory = page.waitForRequest((request) => {
+    const url = new URL(request.url())
+    return url.pathname === '/api/playstyles' && url.searchParams.get('days') === 'all'
+  })
+  await period.selectOption('all')
+  await allHistory
+  await expect(page).toHaveURL(/days=all/)
+  await expect(period).toHaveValue('all')
+  await expect(page.locator('.playstyles-auto')).toContainText('tutto lo storico')
+
+  await page.reload()
+  await expect(period).toHaveValue('all')
+  await expect(page.locator('.playstyles-auto')).toContainText('tutto lo storico')
+  const suggestions = page.getByRole('link', { name: 'Vedi i campioni da provare' })
+  expect(new URL((await suggestions.getAttribute('href'))!, page.url()).searchParams.get('days')).toBe('all')
+
+  await page.getByRole('button', { name: 'Perché Maghi?', exact: true }).click()
+  const evidence = page.waitForRequest((request) => {
+    const url = new URL(request.url())
+    return url.pathname === '/api/playstyle-evidence' && url.searchParams.get('days') === 'all'
+  })
+  await page.getByRole('button', { name: 'Mostra le partite · Maghi', exact: true }).click()
+  await evidence
+  await expect(page.getByRole('region', { name: 'Partite a supporto di Maghi', exact: true })).toBeVisible()
 })
 
 test('smoke API reale della fixture: catalogo e assenza metriche restano leggibili', async ({ page }) => {

@@ -40,6 +40,23 @@ describe('ScoutPage filtro categoria dagli stili', () => {
     expect(screen.getByRole('link', { name: 'Apri la scheda' })).toHaveAttribute('href', expect.stringContaining('detailRole=MIDDLE'))
   })
 
+  it.each([' Orianna ', '   '])('ignora gli spazi ai margini della ricerca %j', async (search) => {
+    renderScout(`/app/fit?section=training&search=${encodeURIComponent(search)}`)
+
+    expect(await screen.findByText('Orianna')).toBeVisible()
+    expect(screen.getByLabelText('Campione')).toHaveValue(search)
+    expect(screen.getByText('1 proposte')).toBeVisible()
+  })
+
+  it.each(['Wukong', 'MonkeyKing'])('trova le scoperte usando il nome o l’identificativo %s', async (search) => {
+    renderScout(`/app/fit?section=training&search=${encodeURIComponent(search)}`, {
+      discover: [discoveryRecommendation({ champion: 'MonkeyKing', name: 'Wukong' })],
+    })
+
+    expect(await screen.findByText('Wukong')).toBeVisible()
+    expect(screen.getByRole('link', { name: 'Apri la scheda' })).toHaveAttribute('href', expect.stringContaining('detail=MonkeyKing'))
+  })
+
   it('usa category come alias iniziale di tag e la elimina quando cambia filtro', async () => {
     const user = renderScout('/app/fit?section=training&category=class%3Aassassin')
     expect(await screen.findByText('Orianna')).toBeVisible()
