@@ -101,6 +101,11 @@ jobs:
       - name: Verify frontend with the shared local command
         run: python scripts/verify_project.py --scope frontend
 
+      - name: Use Ubuntu mirrors for browser dependencies
+        run: |
+          printf '%s\n' 'https://archive.ubuntu.com/ubuntu' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+          printf '%s\n' 'https://security.ubuntu.com/ubuntu' | sudo tee /etc/apt/apt-security-mirrors.txt >/dev/null
+
       - name: Install Playwright browsers
         working-directory: frontend
         run: npx playwright install --with-deps ${{ matrix.browser }}
@@ -200,6 +205,11 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         run: npm run build
+
+      - name: Use Ubuntu mirrors for browser dependencies
+        run: |
+          printf '%s\n' 'https://archive.ubuntu.com/ubuntu' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+          printf '%s\n' 'https://security.ubuntu.com/ubuntu' | sudo tee /etc/apt/apt-security-mirrors.txt >/dev/null
 
       - name: Install Playwright browsers
         working-directory: frontend

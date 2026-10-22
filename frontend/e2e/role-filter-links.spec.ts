@@ -76,6 +76,9 @@ async function expectFilteredObservations(page: Page, screen: Screen, count: num
 
 async function chooseAllWithKeyboard(control: Locator) {
   await control.focus()
+  // Chromium needs its native popup open before Home/Enter on Linux.
+  // Firefox and WebKit commit Home on the closed select instead.
+  if (test.info().project.name === 'chromium') await control.press('Space')
   await control.press('Home')
   await control.press('Enter')
   await control.press('Tab')
